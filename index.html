@@ -1219,13 +1219,11 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     let access='';
     try{
       let testVerified=false;
-      if(state.session){
-        try{
-          await api('/rest/v1/rpc/verify_order_phone_test',{method:'POST',auth:true,body:{p_order_id:s.orderId,p_code:token}});
-          testVerified=true;
-        }catch(te){
-          if(!/invalid_test_code/i.test(String(te?.message||te||'')))throw te;
-        }
+      try{
+        await api('/rest/v1/rpc/verify_order_phone_test_guest',{method:'POST',auth:!!state.session,body:{p_order_id:s.orderId,p_phone:s.phone,p_code:token}});
+        testVerified=true;
+      }catch(te){
+        if(!/invalid_test_code/i.test(String(te?.message||te||'')))throw te;
       }
       if(!testVerified){
         const e164=sl54PhoneE164(s.phone);
