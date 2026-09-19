@@ -1991,7 +1991,7 @@ window.addEventListener('pageshow',function(e){
     ).join(''):'<div class="empty">Pas encore d\'avis vérifiés.</div>';
     main.insertAdjacentHTML('afterend',
       '<section class="sl86-reviews" id="sl86ReviewsSection"><div class="container">'+
-      '<div class="sl86-reviewHead"><div><h2>Avis clients</h2><div class="sub">Uniquement après vérification de la commande.</div></div>'+
+      '<div class="sl86-reviewHead"><div><h2>Avis clients</h2><div class="sub">Uniquement après vérification de la commande.</div><button class="btn primary" style="margin-top:12px" onclick="sl86StartReviewFromShop()">Laisser un avis ⭐</button></div>'+
       '<div><span class="sl86-score">'+Number(data.average||0).toFixed(1)+'/5</span> <span class="sl86-stars">'+sl86Stars(data.average||0)+'</span><div class="sub">'+Number(data.count||0)+' avis</div></div></div>'+
       '<div class="sl86-reviewGrid">'+cards+'</div></div></section>'
     );
@@ -2013,6 +2013,38 @@ window.addEventListener('pageshow',function(e){
     return r;
   };
   publicStore=window.publicStore;
+
+
+  window.sl86StartReviewFromShop=function(){
+    document.querySelector('#sl86ReviewVerifyModal')?.remove();
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="modal" id="sl86ReviewVerifyModal"><div class="modalBox">'+
+      '<div class="panelHead"><div><h2>Laisser un avis</h2><div class="sub">Entrez les informations de votre commande vérifiée.</div></div><button class="modalX" onclick="document.querySelector(\'#sl86ReviewVerifyModal\').remove()">×</button></div>'+
+      '<div class="field"><label>Numéro de commande</label><input id="sl86ReviewRef" maxlength="12" placeholder="Ex: FB9DD8AC" autocomplete="off"></div>'+
+      '<div class="field"><label>Téléphone utilisé pour la commande</label><input id="sl86ReviewPhone" inputmode="tel" autocomplete="tel" placeholder="06XXXXXXXX"></div>'+
+      '<button id="sl86ReviewCheckBtn" class="btn primary full" onclick="sl86CheckReviewOrder()">Vérifier ma commande</button>'+
+      '<p class="sub" style="margin-top:10px">Seules les commandes avec numéro de téléphone vérifié peuvent publier un avis.</p>'+
+      '</div></div>'
+    );
+  };
+
+  window.sl86CheckReviewOrder=async function(){
+    const ref=(document.querySelector('#sl86ReviewRef')?.value||'').trim().toUpperCase().replace(/[^A-F0-9]/g,'');
+    const phone=(document.querySelector('#sl86ReviewPhone')?.value||'').trim();
+    if(ref.length!==8)return toast('Entrez le numéro de commande à 8 caractères.');
+    if(!/^0[67]\d{8}$/.test(phone.replace(/\s+/g,'')))return toast('Entrez le même numéro utilisé pour la commande.');
+    setBusy('#sl86ReviewCheckBtn',true,'Vérification…');
+    try{
+      const e=await api('/rest/v1/rpc/get_review_eligibility',{method:'POST',body:{p_order_number:ref,p_phone:phone}});
+      if(!e?.allowed){
+        if(e?.phone_verified===false)return toast('Cette commande n’est pas encore vérifiée par code.');
+        return toast('Cette commande ne peut pas encore recevoir un avis.');
+      }
+      if(String(e.shop_id||'')!==String(state.publicShop?.id||''))return toast('Cette commande appartient à une autre boutique.');
+      document.querySelector('#sl86ReviewVerifyModal')?.remove();
+      sl86OpenReview(ref,phone,e.existing||null);
+    }catch(err){toast(friendlyError(err));setBusy('#sl86ReviewCheckBtn',false,'Vérifier ma commande')}
+  };
 
   window.sl86OpenReview=function(ref,phone,existing){
     SL86.reviewContext={ref,phone,rating:Number(existing?.rating||0)};
@@ -2044,7 +2076,13 @@ window.addEventListener('pageshow',function(e){
       });
       document.querySelector('#sl86ReviewModal')?.remove();
       toast('Avis enregistré ✅');
-      if(typeof sl60TrackSubmit==='function')setTimeout(()=>sl60TrackSubmit(),150);
+      if(REMOTE&&state.publicShop?.id&&state.publicShop.id!=='demo'){
+        try{
+          SL86.publicReviews=await api('/rest/v1/rpc/get_public_shop_reviews',{method:'POST',body:{p_shop_id:state.publicShop.id}});
+          sl86RenderPublicExtras();
+        }catch{}
+      }
+      if(typeof sl60TrackSubmit==='function'&&document.querySelector('#sl60TrackResult'))setTimeout(()=>sl60TrackSubmit(),150);
     }catch(e){toast(friendlyError(e));setBusy('#sl86ReviewSend',false,'Publier l\'avis')}
   };
 
