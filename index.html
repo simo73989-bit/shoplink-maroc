@@ -1145,7 +1145,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
 
   window.slxSavePublicOrder=async function(order){
     if(!REMOTE){if(state.publicShop.slug===state.shop.slug){const local={id:crypto.randomUUID(),order_number:Math.random().toString(36).slice(2,10).toUpperCase(),...order,phone:String(order.phone).slice(0,3)+'•••••'+String(order.phone).slice(-2),contact_unlocked:false,created_at:new Date().toISOString()};state.orders.unshift(local);DB.set('sl_orders',state.orders);return local}return {id:crypto.randomUUID()}}
-    return api('/rest/v1/rpc/place_public_order_v2',{method:'POST',auth:!!state.session,body:{p_shop_id:order.shop_id,p_customer_name:order.customer_name,p_phone:order.phone,p_city:order.city,p_address:order.address,p_delivery_method:order.delivery_method,p_note:order.note,p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))}})
+    return api('/rest/v1/rpc/place_public_order_v2',{method:'POST',auth:false,body:{p_shop_id:order.shop_id,p_customer_name:order.customer_name,p_phone:order.phone,p_city:order.city,p_address:order.address,p_delivery_method:order.delivery_method,p_note:order.note,p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))}})
   };
   let sl54OtpState=null;
   function sl54PhoneE164(v=''){
@@ -1198,6 +1198,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   window.sl54SendOtp=async function(){
     const s=sl54OtpState;if(!s)return;
     if(s.testMode===true){
+      s.testOnly=true;
       sl54OtpModal('Mode test activé. Entrez votre code test privé.');
       return;
     }
@@ -1208,6 +1209,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       if(!r.ok)throw new Error(d.msg||d.message||d.error_description||'Service SMS indisponible');
       sl54OtpModal('Code envoyé. Il expire rapidement.');
     }catch(e){
+      s.testOnly=true;
       sl54OtpModal('Le service SMS OTP n’est pas encore configuré. Pour vos essais, utilisez votre code test privé.');
     }
   };
@@ -1220,10 +1222,11 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     try{
       let testVerified=false;
       try{
-        await api('/rest/v1/rpc/verify_order_phone_test_guest',{method:'POST',auth:!!state.session,body:{p_order_id:s.orderId,p_phone:s.phone,p_code:token}});
+        await api('/rest/v1/rpc/verify_order_phone_test_guest',{method:'POST',auth:false,body:{p_order_id:s.orderId,p_phone:s.phone,p_code:token}});
         testVerified=true;
       }catch(te){
         if(!/invalid_test_code/i.test(String(te?.message||te||'')))throw te;
+        if(s.testOnly===true)throw te;
       }
       if(!testVerified){
         const e164=sl54PhoneE164(s.phone);
