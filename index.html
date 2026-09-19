@@ -1148,6 +1148,47 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     return api('/rest/v1/rpc/place_public_order_v2',{method:'POST',auth:false,body:{p_shop_id:order.shop_id,p_customer_name:order.customer_name,p_phone:order.phone,p_city:order.city,p_address:order.address,p_delivery_method:order.delivery_method,p_note:order.note,p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))}})
   };
   let sl54OtpState=null;
+  let sl54ResendTimer=null;
+  function sl54CooldownKey(phone=''){
+    return 'sl54_otp_resend_at_'+String(phone||'').replace(/\D/g,'');
+  }
+  function sl54GetResendAt(phone=''){
+    try{
+      const v=Number(sessionStorage.getItem(sl54CooldownKey(phone))||0);
+      return Number.isFinite(v)?v:0;
+    }catch{return 0}
+  }
+  function sl54SetResendAt(phone='',ms=60000){
+    const at=Date.now()+ms;
+    if(sl54OtpState)sl54OtpState.resendAt=at;
+    try{
+      sessionStorage.setItem(sl54CooldownKey(phone),String(at));
+      if(sl54OtpState)sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState));
+    }catch{}
+    return at;
+  }
+  function sl54RenderResendCooldown(btn){
+    if(!btn||!sl54OtpState)return;
+    if(sl54ResendTimer){clearInterval(sl54ResendTimer);sl54ResendTimer=null}
+    const tick=function(){
+      const s=sl54OtpState;
+      if(!s){if(sl54ResendTimer)clearInterval(sl54ResendTimer);sl54ResendTimer=null;return}
+      const at=Math.max(Number(s.resendAt||0),sl54GetResendAt(s.phone));
+      s.resendAt=at;
+      const left=Math.max(0,Math.ceil((at-Date.now())/1000));
+      if(left>0){
+        btn.disabled=true;
+        btn.textContent='Renvoyer le code ('+left+'s)';
+      }else{
+        btn.disabled=false;
+        btn.textContent='Renvoyer le code';
+        if(sl54ResendTimer)clearInterval(sl54ResendTimer);
+        sl54ResendTimer=null;
+      }
+    };
+    tick();
+    if(Number(sl54OtpState.resendAt||0)>Date.now())sl54ResendTimer=setInterval(tick,1000);
+  }
   function sl54PhoneE164(v=''){
     let d=String(v||'').replace(/\D/g,'');
     if(d.startsWith('00'))d=d.slice(2);
@@ -1190,15 +1231,23 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     field.append(label,input);box.appendChild(field);
 
     const verify=document.createElement('button');verify.id='sl54VerifyBtn';verify.className='btn primary full';verify.textContent='Vérifier la commande';verify.onclick=function(){sl54VerifyOtp()};
-    const resend=document.createElement('button');resend.className='btn soft full';resend.style.marginTop='8px';resend.textContent='Renvoyer le code';resend.onclick=function(){sl54SendOtp()};
+    const resend=document.createElement('button');resend.id='sl54ResendBtn';resend.className='btn soft full';resend.style.marginTop='8px';resend.textContent='Renvoyer le code';resend.onclick=function(){sl54SendOtp()};
     const later=document.createElement('button');later.className='btn soft full';later.style.marginTop='8px';later.textContent='Plus tard';later.onclick=function(){modal.remove()};
 
     box.append(verify,resend,later);modal.appendChild(box);document.body.appendChild(modal);
+    sl54RenderResendCooldown(resend);
   }
   window.sl54SendOtp=async function(){
     const s=sl54OtpState;if(!s)return;
+    const cooldownAt=Math.max(Number(s.resendAt||0),sl54GetResendAt(s.phone));
+    s.resendAt=cooldownAt;
+    if(cooldownAt>Date.now()){
+      sl54OtpModal(s.testOnly===true?'Mode test activé. Entrez votre code test privé.':'Attendez la fin du délai avant de renvoyer le code.');
+      return;
+    }
     if(s.testMode===true){
       s.testOnly=true;
+      sl54SetResendAt(s.phone,60000);
       sl54OtpModal('Mode test activé. Entrez votre code test privé.');
       return;
     }
@@ -1207,9 +1256,12 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       const r=await fetch(SUPABASE_URL+'/auth/v1/otp',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({phone:e164})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(d.msg||d.message||d.error_description||'Service SMS indisponible');
-      sl54OtpModal('Code envoyé. Il expire rapidement.');
+      s.testOnly=false;
+      sl54SetResendAt(s.phone,60000);
+      sl54OtpModal('Code envoyé. Vous pourrez le renvoyer dans 60 secondes.');
     }catch(e){
       s.testOnly=true;
+      sl54SetResendAt(s.phone,60000);
       sl54OtpModal('Le service SMS OTP n’est pas encore configuré. Pour vos essais, utilisez votre code test privé.');
     }
   };
@@ -1239,7 +1291,11 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
         if(!rr.ok)throw new Error(rd.message||rd.error||'Vérification impossible');
         try{await fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access}})}catch{}
       }
-      try{sessionStorage.removeItem('sl54_pending_order')}catch{}
+      try{
+        sessionStorage.removeItem('sl54_pending_order');
+        sessionStorage.removeItem(sl54CooldownKey(s.phone));
+      }catch{}
+      if(sl54ResendTimer){clearInterval(sl54ResendTimer);sl54ResendTimer=null}
       document.querySelectorAll('#modal').forEach(function(x){x.remove()});
       const successModal=document.createElement('div');
       successModal.className='modal';
@@ -1272,7 +1328,8 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       state.cart=[];try{sessionStorage.removeItem(ckey())}catch{}
       document.querySelector('#modal')?.remove();renderCart();
       const signedInTest=!!(state.user?.id&&state.session);
-      sl54OtpState={orderId:result?.id,phone,name,ref,expiresAt:result?.verification_expires_at||'',testMode:signedInTest};
+      const resendAt=sl54GetResendAt(phone);
+      sl54OtpState={orderId:result?.id,phone,name,ref,expiresAt:result?.verification_expires_at||'',testMode:signedInTest,resendAt};
       try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState))}catch{}
       sl54OtpModal('Envoi du code OTP…');
       await sl54SendOtp();
