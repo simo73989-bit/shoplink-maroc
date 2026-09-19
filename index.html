@@ -2167,4 +2167,145 @@ window.addEventListener('pageshow',function(e){
 })();
 </script>
 
+
+<style id="sl87-recovery-style">
+.sl87RecoverBtn{white-space:nowrap}
+.sl87RecoverySummary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
+.sl87RecoverySummary>div{padding:11px 12px;border:1px solid #e1e7e3;border-radius:12px;background:#f8faf9}
+.sl87RecoverySummary b{display:block;font-size:11px;color:#718078;margin-bottom:3px}
+.sl87RecoveryWarn{padding:12px 14px;border:1px solid #f2cc77;background:#fff8e5;color:#6d4c00;border-radius:12px;line-height:1.5;margin:12px 0}
+.sl87RecoveryHistory{display:grid;gap:8px;max-height:220px;overflow:auto;margin-top:10px}
+.sl87RecoveryHistory>div{padding:9px 10px;border:1px solid #e3e8e5;border-radius:10px;background:#fff;font-size:12px}
+.sl87Confirm{padding:12px;border:1px solid #fecaca;background:#fffafa;border-radius:12px;margin:12px 0}
+.sl87Confirm label{display:flex;gap:9px;align-items:flex-start}
+.sl87Confirm input[type=checkbox]{margin-top:3px}
+@media(max-width:700px){.sl87RecoverySummary{grid-template-columns:1fr}}
+</style>
+<script id="sl87-support-recovery">
+(function(){
+  const R={target:null};
+  window.SL87=R;
+
+  const FE=window.friendlyError;
+  window.friendlyError=function(e){
+    const m=String(e?.message||e||'');
+    if(/cannot_recover_self/i.test(m))return 'Ma t9derch tdir recovery l compte admin dyalk.';
+    if(/cannot_recover_admin/i.test(m))return 'Compte admin ma kaytrecoverach mn had loutil.';
+    if(/recovery_reason_required/i.test(m))return 'Kteb sabab wad7 dyal recovery.';
+    if(/user_not_found/i.test(m))return 'Compte ma tl9ach.';
+    if(/email_change_failed/i.test(m))return 'Ma t9drnach nbdlo l e-mail. Momkin deja mst3ml f compte akhor.';
+    return FE?FE(e):m;
+  };
+  friendlyError=window.friendlyError;
+
+  function sl87EnhanceUsers(){
+    const panel=document.querySelector('[data-sl60-panel="users"]');
+    const rows=panel?.querySelectorAll('tbody tr');
+    const users=window.SL60?.adminUsers?.users||[];
+    if(!panel||!rows?.length||!users.length)return;
+    rows.forEach(function(tr,i){
+      const u=users[i];
+      if(!u||String(u.id)===String(state.user?.id)||tr.querySelector('.sl87RecoverBtn'))return;
+      const actions=tr.querySelector('td:last-child .rowBtns')||tr.querySelector('td:last-child');
+      if(!actions)return;
+      const b=document.createElement('button');
+      b.className='btn soft sl41-mini sl87RecoverBtn';
+      b.type='button';
+      b.textContent='🛟 Récupérer';
+      b.onclick=function(){sl87OpenRecovery(u.id)};
+      actions.appendChild(b);
+    });
+  }
+  window.sl87EnhanceUsers=sl87EnhanceUsers;
+
+  function histHtml(list){
+    if(!Array.isArray(list)||!list.length)return '<div class="sub">Aucun historique.</div>';
+    return '<div class="sl87RecoveryHistory">'+list.map(function(x){
+      const before=x.old_email?esc(x.old_email):'—';
+      const after=x.new_email?esc(x.new_email):'—';
+      return '<div><b>'+before+' → '+after+'</b><br><span class="sub">'+formatDate(x.changed_at||x.created_at)+' • '+esc(x.source||x.reason||'')+'</span></div>';
+    }).join('')+'</div>';
+  }
+
+  window.sl87OpenRecovery=async function(userId){
+    document.querySelector('#sl87RecoveryModal')?.remove();
+    try{
+      const d=await api('/rest/v1/rpc/admin_validate_recovery_target',{method:'POST',auth:true,body:{p_user_id:userId}});
+      R.target=d;
+      document.body.insertAdjacentHTML('beforeend',
+        '<div class="modal" id="sl87RecoveryModal"><div class="modalBox">'+
+        '<div class="panelHead"><div><h2>🛟 Récupération de compte</h2><div class="sub">Outil support — compte perdu ou volé</div></div><button class="modalX" onclick="document.querySelector(\'#sl87RecoveryModal\').remove()">×</button></div>'+
+        '<div class="sl87RecoveryWarn"><b>Important :</b> dir had recovery ghir ila t2kkedti mn howiyat sahib l compte. Had lprocess kay7yed ga3 sessions, kay7yed MFA, w y9der ybdel e-mail.</div>'+
+        '<div class="sl87RecoverySummary">'+
+          '<div><b>Vendeur</b>'+esc(d.full_name||'Utilisateur')+'</div>'+
+          '<div><b>E-mail actuel</b>'+esc(d.email||'—')+'</div>'+
+          '<div><b>Boutique</b>'+esc(d.shop_name||'Sans boutique')+'</div>'+
+          '<div><b>Ville / WhatsApp</b>'+esc(d.shop_city||'—')+' • '+esc(d.shop_phone||'—')+'</div>'+
+          '<div><b>Inscription</b>'+formatDate(d.created_at)+'</div>'+
+          '<div><b>Dernière connexion</b>'+formatDate(d.last_sign_in_at)+'</div>'+
+        '</div>'+
+        '<details><summary><b>Historique des e-mails</b></summary>'+histHtml(d.email_history)+'</details>'+
+        '<div class="field" style="margin-top:14px"><label>Nouvel e-mail sécurisé (optionnel)</label><input id="sl87NewEmail" type="email" placeholder="Laisser vide pour garder '+attr(d.email||'l e-mail actuel')+'"><small style="display:block;margin-top:6px;color:#718078">Ila l7rami bdel e-mail, dkhl hna e-mail jdida li support t2kked menha.</small></div>'+
+        '<div class="field"><label>Raison / preuve vérifiée</label><textarea id="sl87Reason" rows="4" maxlength="1000" placeholder="Ex: client a confirmé ancien e-mail, nom boutique, téléphone et détails commande…"></textarea></div>'+
+        '<div class="sl87Confirm"><label><input id="sl87IdentityOk" type="checkbox"> <span><b>Je confirme que j’ai vérifié l’identité du propriétaire.</b><br><small>Ma ndirch recovery ghir b talab bla vérification.</small></span></label></div>'+
+        '<label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input id="sl87CloseShop" type="checkbox" checked> Fermer temporairement la boutique pendant la récupération</label>'+
+        '<div class="field"><label>Confirmation</label><input id="sl87ConfirmWord" autocomplete="off" placeholder="Écrivez RECUPERER"></div>'+
+        '<button id="sl87RecoverRun" class="btn primary full" onclick="sl87RunRecovery()">Sécuriser et récupérer le compte</button>'+
+        (Array.isArray(d.recovery_history)&&d.recovery_history.length?'<details style="margin-top:16px"><summary><b>Historique support recovery</b></summary>'+histHtml(d.recovery_history)+'</details>':'')+
+        '</div></div>'
+      );
+    }catch(e){toast(friendlyError(e))}
+  };
+
+  window.sl87RunRecovery=async function(){
+    const d=R.target;if(!d)return;
+    const newEmail=(document.querySelector('#sl87NewEmail')?.value||'').trim().toLowerCase();
+    const reason=(document.querySelector('#sl87Reason')?.value||'').trim();
+    const identityOk=!!document.querySelector('#sl87IdentityOk')?.checked;
+    const closeShop=!!document.querySelector('#sl87CloseShop')?.checked;
+    const word=(document.querySelector('#sl87ConfirmWord')?.value||'').trim().toUpperCase();
+
+    if(!identityOk)return toast('Confirme d’abord que l’identité du propriétaire a été vérifiée.');
+    if(reason.length<10)return toast('Kteb sabab / preuve b wa7d chwiya dyal tafasil.');
+    if(word!=='RECUPERER')return toast('Kteb RECUPERER bach t2kked.');
+    if(newEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail))return toast('Nouvel e-mail invalide.');
+
+    setBusy('#sl87RecoverRun',true,'Sécurisation…');
+    try{
+      const out=await api('/functions/v1/account-recovery',{
+        method:'POST',auth:true,
+        body:{user_id:d.id,new_email:newEmail,reason,close_shop:closeShop}
+      });
+
+      const msg=[
+        'Compte sécurisé ✅',
+        out.sessions_revoked?('Sessions fermées : '+Number(out.sessions_revoked)):'Sessions anciennes fermées.',
+        out.mfa_cleared?('MFA supprimé : '+Number(out.mfa_cleared)):'MFA vérifié/nettoyé.',
+        out.email_changed?('E-mail remplacé par : '+out.email):('E-mail conservé : '+out.email),
+        out.recovery_email_sent?'Lien de récupération envoyé ✅':'⚠️ Lien e-mail non envoyé — réessayez plus tard.',
+        out.shop_closed?'Boutique fermée temporairement.':'Boutique laissée ouverte.'
+      ].join('\n');
+
+      document.querySelector('#sl87RecoveryModal')?.remove();
+      alert(msg);
+      if(typeof sl60RenderAdmin==='function')await sl60RenderAdmin();
+      setTimeout(function(){sl60AdminTab?.('users')},80);
+    }catch(e){
+      toast(friendlyError(e));
+      setBusy('#sl87RecoverRun',false,'Sécuriser et récupérer le compte');
+    }
+  };
+
+  const OLD_ADMIN=window.sl60RenderAdmin;
+  if(OLD_ADMIN){
+    window.sl60RenderAdmin=async function(){
+      const r=await OLD_ADMIN();
+      setTimeout(sl87EnhanceUsers,40);
+      return r;
+    };
+    sl60RenderAdmin=window.sl60RenderAdmin;
+  }
+})();
+</script>
+
 </body></html>
