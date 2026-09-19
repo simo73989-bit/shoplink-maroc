@@ -229,7 +229,7 @@ const state = {
   publicProducts: []
 };
 
-const categories = ['Mode', 'Beauté', 'Maison', 'Artisanat', 'Électronique', 'Restauration', 'Services', 'Autre'];
+const categories = ["Mode & vêtements","Chaussures & maroquinerie","Bijoux & accessoires","Beauté & soins","Maison & décoration","Meubles","Électroménager","Téléphones & accessoires","Informatique","Électronique","Gaming & jeux vidéo","Auto & moto","Pièces & accessoires auto/moto","Sport & fitness","Bébé & enfants","Jouets & jeux","Livres & papeterie","Alimentation & épicerie","Restauration","Pâtisserie & desserts","Boissons sans alcool","Artisanat","Cadeaux & fleurs","Bricolage & outils","Jardin & agriculture","Construction & matériaux","Animaux de compagnie","Matériel professionnel","Photo & impression","Musique & instruments","Services","Digital & logiciels","Événementiel","Voyage & loisirs","Immobilier","Véhicules","Seconde main","Produits locaux","Autre"];
 const statusLabels = {new:'Nouvelle',confirmed:'Confirmée',preparing:'En préparation',ready:'Prête',delivered:'Livrée',cancelled:'Annulée'};
 
 function slxScrollTo(id){
@@ -843,7 +843,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   if(baseProductsTable) window.productsTable=function(){const h=baseProductsTable();return `<div class="slsec-limit">Protection anti-spam : maximum ${PRODUCT_LIMIT} produits/services sur l’offre gratuite.</div>${h}`};
 
   const baseAuth=window.auth;
-  if(baseAuth) window.auth=function(mode){baseAuth(mode);if(mode==='signup'&&!document.querySelector('#slsecTerms')){const btn=document.querySelector('#authBtn')||document.querySelector('.authCard .btn.primary');if(btn){btn.insertAdjacentHTML('beforebegin',`<div class="slsec-terms" id="slsecTerms"><label><input type="checkbox" id="slsecAgree"> <span>J’accepte les règles ShopLink Maroc : annonces réelles, produits/services légaux, informations honnêtes et interdiction de toute tentative d’arnaque.</span></label></div>`)}}};
+  if(baseAuth) window.auth=function(mode){baseAuth(mode);if(mode==='signup'&&!document.querySelector('#slsecTerms')){const btn=document.querySelector('#authBtn')||document.querySelector('.authCard .btn.primary');if(btn){btn.insertAdjacentHTML('beforebegin',`<div class="slsec-terms" id="slsecTerms"><label><input type="checkbox" id="slsecAgree"> <span>J’accepte les règles ShopLink Maroc : annonces réelles, produits/services autorisés, informations honnêtes, aucune contrefaçon, produit volé, arme, drogue, alcool/nicotine, produit dangereux ou autre contenu interdit.</span></label></div>`)}}};
   const baseSubmit=window.submitAuth;
   if(baseSubmit) window.submitAuth=async function(mode){if(mode==='signup'&&!document.querySelector('#slsecAgree')?.checked)return toast('Acceptez les règles ShopLink Maroc pour créer le compte.');return baseSubmit(mode)};
 
@@ -871,7 +871,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
 
   window.slsecReport=function(productId=''){
     const s=state.publicShop||{};
-    document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="slsecModal"><div class="modalBox"><div class="panelHead"><h2>Signaler cette boutique</h2><button class="modalX" onclick="document.querySelector('#slsecModal').remove()">×</button></div><div class="slsec-reportbox"><p class="sub">Aidez-nous à identifier les annonces trompeuses, interdites ou suspectes.</p><select id="slsecReason"><option value="arnaque">Suspicion d’arnaque</option><option value="faux">Fausse annonce / informations trompeuses</option><option value="interdit">Produit ou service interdit</option><option value="spam">Spam</option><option value="autre">Autre</option></select><textarea id="slsecDetails" rows="4" maxlength="500" placeholder="Expliquez brièvement le problème…"></textarea><button id="slsecSend" class="btn primary full" onclick="slsecSendReport('${String(productId).replace(/'/g,'')}')">Envoyer le signalement</button></div></div></div>`)
+    document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="slsecModal"><div class="modalBox"><div class="panelHead"><h2>${productId?'Signaler ce produit':'Signaler cette boutique'}</h2><button class="modalX" onclick="document.querySelector('#slsecModal').remove()">×</button></div><div class="slsec-reportbox"><p class="sub">Aidez-nous à identifier les annonces trompeuses, interdites ou suspectes.</p><select id="slsecReason"><option value="arnaque">Suspicion d’arnaque</option><option value="faux">Fausse annonce / informations trompeuses</option><option value="interdit">Produit ou service interdit</option><option value="spam">Spam</option><option value="autre">Autre</option></select><textarea id="slsecDetails" rows="4" maxlength="500" placeholder="Expliquez brièvement le problème…"></textarea><button id="slsecSend" class="btn primary full" onclick="slsecSendReport('${String(productId).replace(/'/g,'')}')">Envoyer le signalement</button></div></div></div>`)
   };
   window.slsecSendReport=async function(productId=''){
     const reason=document.querySelector('#slsecReason')?.value||'autre',details=document.querySelector('#slsecDetails')?.value.trim()||'';
@@ -914,7 +914,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   function sl41Digits(v=''){return String(v).replace(/\D/g,'')}
   function sl41PhoneOk(v=''){let d=sl41Digits(v);if(d.startsWith('00'))d=d.slice(2);return /^0[67]\d{8}$/.test(d)||/^212[67]\d{8}$/.test(d)}
   function sl41Template(){try{return JSON.parse(localStorage.getItem('sl41_template')||'null')}catch{return null}}
-  function sl41TemplateDefaults(){const t=sl41Template()?.value||'Products';if(t==='Restaurant')return {category:'Restauration',emoji:'🍽️'};if(t==='Fashion')return {category:'Mode',emoji:'👕'};return {category:'Autre',emoji:'🛍️'}}
+  function sl41TemplateDefaults(){const t=sl41Template()?.value||'Autre';const em={'Restauration':'🍽️','Mode & vêtements':'👕','Beauté & soins':'💄','Maison & décoration':'🏠','Électronique':'📱','Téléphones & accessoires':'📱','Animaux de compagnie':'🐾','Auto & moto':'🚗','Véhicules':'🚘','Immobilier':'🏠','Services':'🧰','Artisanat':'🎨','Alimentation & épicerie':'🛒','Pâtisserie & desserts':'🍰','Cadeaux & fleurs':'🎁'};return {category:t,emoji:em[t]||'🛍️'}}
   function sl41OrderRef(o){return o.order_number||String(o.id||'').replace(/-/g,'').slice(0,8).toUpperCase()}
 
   const SL41_friendlyError=window.friendlyError;
@@ -925,7 +925,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     if(/shop_closed_or_missing/i.test(m))return 'Cette boutique est fermée ou indisponible.';
     if(/duplicate_order_too_fast/i.test(m))return 'Cette commande vient déjà d’être envoyée. Attendez quelques secondes.';
     if(/rate_limit_exceeded/i.test(m))return 'Trop de commandes envoyées en peu de temps. Réessayez plus tard.';
-    if(/product_missing_or_inactive/i.test(m))return 'Un produit n’est plus disponible.';
+    if(/product_missing_or_inactive/i.test(m))return 'Un produit n’est plus disponible.';if(/product_not_allowed/i.test(m))return 'Ce produit ou service n’est pas autorisé sur ShopLink Maroc. Vérifiez les règles de vente.';
     if(/insufficient_stock/i.test(m))return 'Stock insuffisant pour un des produits.';
     if(/forbidden/i.test(m))return 'Accès non autorisé.';
     if(/invalid_test_code/i.test(m))return 'Code test incorrect.';if(/test_login_required/i.test(m))return 'Connectez-vous à un compte ShopLink pour utiliser le code test.';if(/test_order_owner_only/i.test(m))return 'Ce compte peut utiliser le code test uniquement sur une commande qu’il a créée ou sur sa propre boutique.';if(/phone_not_verified|phone_mismatch|phone_claim_missing/i.test(m))return 'Le numéro du client doit d’abord être vérifié par code OTP.';if(/verification_expired/i.test(m))return 'La vérification a expiré. La commande doit être recommencée.';if(/pending_verification_exists/i.test(m))return 'Une commande avec ce numéro attend déjà la vérification OTP.';if(/contact_locked/i.test(m))return 'Payez 5 DH pour cette commande avant de modifier le statut ou afficher les coordonnées.';
@@ -1072,6 +1072,112 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   window.sl41DeleteOrder=async function(id){if(!confirm('Supprimer cette commande ?'))return;try{if(REMOTE)await api('/rest/v1/rpc/seller_delete_order',{method:'POST',auth:true,body:{p_order_id:id}});state.orders=state.orders.filter(o=>String(o.id)!==String(id));if(!REMOTE)DB.set('sl_orders',state.orders);toast('Commande supprimée ✅');dashTab('orders')}catch(e){toast(friendlyError(e))}};
   window.sl41PrintOrder=function(id){const o=state.orders.find(x=>String(x.id)===String(id));if(!o)return;const items=(o.items||[]).map(i=>`<tr><td>${esc(i.qty)}× ${esc(i.name)}</td><td style="text-align:right">${money(Number(i.price)*Number(i.qty||1))}</td></tr>`).join('');const w=window.open('','_blank','width=520,height=720');if(!w)return toast('Autorisez les fenêtres pop-up pour imprimer.');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Commande #${esc(sl41OrderRef(o))}</title><style>body{font-family:system-ui;padding:24px;color:#111}h1{font-size:20px}table{width:100%;border-collapse:collapse}td{padding:7px 0;border-bottom:1px dashed #bbb}.total{font-size:20px;font-weight:800;text-align:right;margin-top:15px}.muted{color:#666;font-size:12px}</style></head><body><h1>ShopLink Maroc — #${esc(sl41OrderRef(o))}</h1><p><b>${esc(o.customer_name||'Client')}</b><br>${esc(o.phone||'')}<br>${esc(o.city||'')} ${esc(o.address||'')}</p><p class="muted">${esc(o.delivery_method||'')} • ${esc(formatDate(o.created_at))}</p><table>${items}</table><div class="total">${money(o.total)}</div><script>window.onload=()=>window.print()<\/script>
 
+
+
+<style id="sl85-policy-style">
+.sl85-policyBox{margin:14px 0;padding:13px 14px;border:1px solid #e5d38a;background:#fff9e8;border-radius:12px;color:#5e4a09;font-size:12px;line-height:1.55}
+.sl85-policyBox label{display:flex;gap:9px;align-items:flex-start}.sl85-policyBox input{margin-top:3px}.sl85-policyBox button{border:0;background:transparent;color:#166534;text-decoration:underline;font-weight:800;cursor:pointer;padding:0}
+.sl85-reportProduct{margin-top:10px;border:0;background:transparent;color:#6b7772;text-decoration:underline;font-size:11px;cursor:pointer;padding:4px 0}
+.sl85-reportProduct:hover{color:#b42318}
+.sl85-policyList{display:grid;gap:9px;margin:14px 0}.sl85-policyList div{padding:10px 12px;border-radius:10px;background:#f7f9f8;border:1px solid #e3e8e5}
+</style>
+<script id="sl85-categories-policy">
+(function(){
+  const disallowedLocal=/(^|[^a-z0-9_])(pistolet|revolver|fusil|arme a feu|arme à feu|firearm|gun|munition|munitions|ammunition|silencieux|silencer|grenade|dynamite|explosif|explosive|fireworks|cocaine|cocaïne|heroine|héroïne|methamphetamine|mdma|ecstasy|lsd|cannabis|marijuana|hashish|haschich|thc|psilocybin|cigarette|cigarettes|vape|vapotage|nicotine|tabac|vodka|whisky|whiskey|rhum|rum|beer|biere|bière|wine|vin|spyware|stalkerware|keylogger|malware|cyanure|cyanide|ricin|ivoire|ivory)([^a-z0-9_]|$)/i;
+
+  window.sl85PolicyModal=function(){
+    document.querySelector('#sl85PolicyModal')?.remove();
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="modal" id="sl85PolicyModal"><div class="modalBox">'+
+      '<div class="panelHead"><div><h2>Règles de vente ShopLink Maroc</h2><div class="sub">Les vendeurs doivent proposer uniquement des produits et services autorisés.</div></div><button class="modalX" onclick="document.querySelector(\'#sl85PolicyModal\').remove()">×</button></div>'+
+      '<div class="sl85-policyList">'+
+      '<div><b>Interdits :</b> armes et explosifs, drogues, alcool et nicotine, médicaments/substances réglementés, produits dangereux.</div>'+
+      '<div><b>Interdits :</b> contrefaçons, produits volés, fausse monnaie, contenus ou produits sexuels explicites, jeux d’argent et services de pari.</div>'+
+      '<div><b>Interdits :</b> logiciels malveillants/espions et commerce illégal d’espèces protégées ou produits issus de la faune protégée.</div>'+
+      '<div><b>Animaux de compagnie :</b> nourriture, accessoires, services et annonces légales sont permis. Les espèces protégées et le trafic d’animaux sont interdits.</div>'+
+      '<div><b>Modération :</b> toute annonce peut être signalée. ShopLink peut masquer ou supprimer une annonce et bloquer un compte en cas d’abus.</div>'+
+      '</div>'+
+      '<button class="btn primary full" onclick="document.querySelector(\'#sl85PolicyModal\').remove()">J’ai compris</button>'+
+      '</div></div>'
+    );
+  };
+
+  const oldOpen=window.openProductModal||openProductModal;
+  window.openProductModal=function(id=''){
+    oldOpen(id);
+    setTimeout(function(){
+      const modal=document.querySelector('#modal .modalBox');
+      if(!modal||modal.querySelector('#sl85PolicyAgree'))return;
+      const actions=modal.querySelector('.modalActions');
+      if(!actions)return;
+      actions.insertAdjacentHTML('beforebegin',
+        '<div class="sl85-policyBox"><label><input type="checkbox" id="sl85PolicyAgree"> <span>Je confirme que ce produit/service respecte les règles ShopLink Maroc et n’est pas interdit. <button type="button" onclick="sl85PolicyModal()">Voir les règles</button></span></label></div>'
+      );
+    },0);
+  };
+  openProductModal=window.openProductModal;
+
+  const oldSave=window.saveProduct||saveProduct;
+  window.saveProduct=async function(id=''){
+    if(!document.querySelector('#sl85PolicyAgree')?.checked){
+      return toast('Confirmez d’abord que le produit respecte les règles de vente.');
+    }
+    const name=document.querySelector('#pName')?.value.trim()||'';
+    const description=document.querySelector('#pDesc')?.value.trim()||'';
+    const category=document.querySelector('#pCategory')?.value||'Autre';
+
+    if(disallowedLocal.test((name+' '+description+' '+category).toLowerCase())){
+      return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
+    }
+
+    if(REMOTE){
+      try{
+        const check=await api('/rest/v1/rpc/check_product_policy',{method:'POST',auth:true,body:{p_name:name,p_description:description,p_category:category}});
+        if(check&&check.allowed===false)return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
+      }catch(e){
+        if(/product_not_allowed/i.test(String(e?.message||e||'')))return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
+        throw e;
+      }
+    }
+    return oldSave(id);
+  };
+  saveProduct=window.saveProduct;
+
+  // Final catalogue renderer: keep current shop behavior and add per-product reporting.
+  window.catalogCards=function(products){
+    return (products||[]).map(function(p){
+      const service=(p.category||'').toLowerCase()==='services'&&(p.stock===null||p.stock===undefined);
+      const disabled=!state.publicShop.is_open||(!service&&p.stock!==null&&Number(p.stock)<=0);
+      return '<article class="catalogCard" data-cat="'+attr(p.category||'')+'">'+
+        (p.image_url?'<div class="catalogImg photo"><img src="'+attr(p.image_url)+'" alt="'+attr(p.name)+'"></div>':'<div class="catalogImg">'+esc(p.emoji||'📦')+'</div>')+
+        '<div class="catalogBody"><div class="catalogCategory">'+(service?'🧰 Service':esc(p.category||''))+'</div>'+
+        '<h3>'+esc(p.name)+'</h3><p>'+esc(p.description||(service?'Service disponible':'Produit disponible'))+'</p>'+
+        '<div class="catalogBottom"><div><b class="price">'+money(p.price)+'</b>'+
+        (service?'<small class="stock">Sur demande</small>':(p.stock!==null&&p.stock!==undefined?'<small class="stock">'+(Number(p.stock)>0?Number(p.stock)+' en stock':'Rupture')+'</small>':''))+
+        '</div><button class="btn primary" '+(disabled?'disabled':'')+' onclick="addCartById(\''+String(p.id).replace(/'/g,'')+'\')">'+(service?'Choisir':'Ajouter')+'</button></div>'+
+        '<button type="button" class="sl85-reportProduct" onclick="event.stopPropagation();slsecReport(\''+String(p.id).replace(/'/g,'')+'\')">⚑ Signaler ce produit</button>'+
+        '</div></article>';
+    }).join('');
+  };
+  catalogCards=window.catalogCards;
+
+  const oldLanding=window.landing;
+  if(oldLanding){
+    window.landing=function(){
+      oldLanding();
+      const links=document.querySelector('.sl60FooterLinks')||document.querySelector('.footer');
+      if(links&&!links.querySelector('.sl85-rules-link')){
+        const b=document.createElement('button');
+        b.className='sl85-rules-link';
+        b.textContent='Règles de vente';
+        b.onclick=sl85PolicyModal;
+        links.appendChild(b);
+      }
+    };
+    landing=window.landing;
+  }
+})();
+</script>
 
 </body></html>`);w.document.close()};
   async function sl41RefreshOrders(){if(!REMOTE){dashTab('orders');return}try{const rows=await api('/rest/v1/rpc/get_seller_orders',{method:'POST',auth:true,body:{}});state.orders=(Array.isArray(rows)?rows:[]).map(normalizeOrder);const shops=await api(`/rest/v1/shops?owner_id=eq.${encodeURIComponent(state.user.id)}&select=*`,{auth:true});if(shops[0])state.shop=normalizeShop(shops[0]);dashTab('orders')}catch(e){toast(friendlyError(e))}}
@@ -1374,9 +1480,9 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
 
   const SL41_auth=window.auth;
   window.auth=function(mode){SL41_auth(mode);if(mode==='signup')setTimeout(sl41InjectTemplate,0)};
-  function sl41InjectTemplate(){const card=document.querySelector('.authCard');if(!card||document.querySelector('#sl41Template'))return;const btn=document.querySelector('#authBtn')||card.querySelector('.btn.primary');if(!btn)return;btn.insertAdjacentHTML('beforebegin',`<div class="field" id="sl41Template"><label>Type de boutique</label><select id="sl41TemplateValue"><option value="Restaurant">Restaurant</option><option value="Fashion">Mode / Fashion</option><option value="Products" selected>Produits / services</option></select></div>`)}
+  function sl41InjectTemplate(){const card=document.querySelector('.authCard');if(!card||document.querySelector('#sl41Template'))return;const btn=document.querySelector('#authBtn')||card.querySelector('.btn.primary');if(!btn)return;btn.insertAdjacentHTML('beforebegin',`<div class="field" id="sl41Template"><label>Catégorie principale</label><select id="sl41TemplateValue">${categories.map(c=>`<option value="${attr(c)}" ${c==='Autre'?'selected':''}>${esc(c)}</option>`).join('')}</select><small style="display:block;margin-top:6px;color:#738078">Choisissez la catégorie la plus proche de votre activité.</small></div>`)}
   const SL41_submitAuth=window.submitAuth;
-  window.submitAuth=async function(mode){if(mode==='signup'){const v=document.querySelector('#sl41TemplateValue')?.value||'Products';try{localStorage.setItem('sl41_template',JSON.stringify({value:v,at:Date.now()}))}catch{}}return SL41_submitAuth(mode)};
+  window.submitAuth=async function(mode){if(mode==='signup'){const v=document.querySelector('#sl41TemplateValue')?.value||'Autre';try{localStorage.setItem('sl41_template',JSON.stringify({value:v,at:Date.now()}))}catch{}}return SL41_submitAuth(mode)};
 
   const SL41_render=window.render;
   window.render=async function(){const path=location.pathname.replace(/\/+$/,'')||'/';if(/^\/store\//i.test(path)){const slug=decodeURIComponent(path.split('/').filter(Boolean).slice(1).join('/'));return publicStore(slug)}if(path==='/create-store'){if(state.user)return dashboard();auth('signup');sl41InjectTemplate();return}const r=location.hash.slice(1);if(r==='explore')return sl41Explore();return SL41_render()};
