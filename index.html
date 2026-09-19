@@ -1067,6 +1067,178 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   };
   window.sl41DeleteOrder=async function(id){if(!confirm('Supprimer cette commande ?'))return;try{if(REMOTE)await api('/rest/v1/rpc/seller_delete_order',{method:'POST',auth:true,body:{p_order_id:id}});state.orders=state.orders.filter(o=>String(o.id)!==String(id));if(!REMOTE)DB.set('sl_orders',state.orders);toast('Commande supprimée ✅');dashTab('orders')}catch(e){toast(friendlyError(e))}};
   window.sl41PrintOrder=function(id){const o=state.orders.find(x=>String(x.id)===String(id));if(!o)return;const items=(o.items||[]).map(i=>`<tr><td>${esc(i.qty)}× ${esc(i.name)}</td><td style="text-align:right">${money(Number(i.price)*Number(i.qty||1))}</td></tr>`).join('');const w=window.open('','_blank','width=520,height=720');if(!w)return toast('Autorisez les fenêtres pop-up pour imprimer.');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Commande #${esc(sl41OrderRef(o))}</title><style>body{font-family:system-ui;padding:24px;color:#111}h1{font-size:20px}table{width:100%;border-collapse:collapse}td{padding:7px 0;border-bottom:1px dashed #bbb}.total{font-size:20px;font-weight:800;text-align:right;margin-top:15px}.muted{color:#666;font-size:12px}</style></head><body><h1>ShopLink Maroc — #${esc(sl41OrderRef(o))}</h1><p><b>${esc(o.customer_name||'Client')}</b><br>${esc(o.phone||'')}<br>${esc(o.city||'')} ${esc(o.address||'')}</p><p class="muted">${esc(o.delivery_method||'')} • ${esc(formatDate(o.created_at))}</p><table>${items}</table><div class="total">${money(o.total)}</div><script>window.onload=()=>window.print()<\/script>
+
+</body></html>`);w.document.close()};
+  async function sl41RefreshOrders(){if(!REMOTE){dashTab('orders');return}try{const rows=await api('/rest/v1/rpc/get_seller_orders',{method:'POST',auth:true,body:{}});state.orders=(Array.isArray(rows)?rows:[]).map(normalizeOrder);const shops=await api(`/rest/v1/shops?owner_id=eq.${encodeURIComponent(state.user.id)}&select=*`,{auth:true});if(shops[0])state.shop=normalizeShop(shops[0]);dashTab('orders')}catch(e){toast(friendlyError(e))}}
+  window.sl41RefreshOrders=sl41RefreshOrders;
+
+  function sl41PaymentModal(data,id){const configured=data?.provider_configured===true&&data?.checkout_url;document.querySelector('#sl41PayModal')?.remove();document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="sl41PayModal"><div class="modalBox"><div class="panelHead"><h2>Débloquer le contact</h2><button class="modalX" onclick="document.querySelector('#sl41PayModal').remove()">×</button></div>${configured?`<p>Le déblocage coûte <b>5 DH pour cette commande</b>. Après paiement, le téléphone, l’adresse et la localisation seront affichés.</p><div class="modalActions"><button class="btn soft" onclick="document.querySelector('#sl41PayModal').remove()">Plus tard</button><button class="btn primary" onclick="sl41OpenPayment('${id}','${attr(data.payment_id||'')}','${attr(data.checkout_url||'')}')">Payer 5 DH</button></div><button class="btn soft full" style="margin-top:10px" onclick="sl41VerifyUnlock('${id}')">Vérifier le paiement</button>`:`<div class="sl41-providerBox"><b>Paiement en ligne pas encore relié.</b><br>Le système 5 DH est prêt et sécurisé, mais un compte prestataire de paiement doit être connecté avant d’encaisser réellement. Aucun téléphone, adresse ou localisation ne sera affiché tant que le paiement de 5 DH de cette commande n’est pas confirmé.</div>`}</div></div>`)}
+  window.sl41OpenPayment=function(orderId,paymentId,raw){try{const u=new URL(raw,location.origin);if(paymentId&&!u.searchParams.has('payment_id'))u.searchParams.set('payment_id',paymentId);if(!u.searchParams.has('order_id'))u.searchParams.set('order_id',orderId);if(!u.searchParams.has('amount'))u.searchParams.set('amount','5');if(!u.searchParams.has('currency'))u.searchParams.set('currency','MAD');if(!u.searchParams.has('return_url'))u.searchParams.set('return_url',location.href);window.open(u.toString(),'_blank','noopener')}catch{window.open(raw,'_blank','noopener')}};
+  window.sl41VerifyUnlock=async function(id){document.querySelector('#sl41PayModal')?.remove();await sl41UnlockContact(id)};
+  window.sl41UnlockContact=async function(id){
+    try{const data=await api('/functions/v1/contact-unlock',{method:'POST',auth:true,body:{order_id:id}});if(data?.unlocked){const o=state.orders.find(x=>String(x.id)===String(id));if(o){o.contact_unlocked=true;o.phone=data.phone||o.phone;o.address=data.address||o.address||'';o.payment_status=data.payment_status||'succeeded';o.unlocked_at=new Date().toISOString()}toast('Contact débloqué ✅');await sl41RefreshOrders();return}sl41PaymentModal(data,id)}catch(e){toast(friendlyError(e))}
+  };
+
+  const SL41_publicStore=window.publicStore;
+  window.publicStore=async function(slug){
+    showLoader('Chargement de la boutique...');
+    try{
+      if(REMOTE){const rows=await api('/rest/v1/rpc/get_public_shop_by_slug',{method:'POST',body:{p_slug:slug}});const shop=Array.isArray(rows)?rows[0]:rows;if(!shop)return notFoundStore();state.publicShop=normalizeShop(shop);state.publicProducts=(await api(`/rest/v1/products?shop_id=eq.${state.publicShop.id}&is_active=eq.true&select=id,name,description,category,price,stock,emoji,image_url,is_active&order=created_at.desc`)).map(normalizeProduct)}
+      else return SL41_publicStore(slug);
+      renderStore();
+    }catch(e){app.innerHTML=`<div class="centerError">${brand()}<h2>Impossible de charger la boutique</h2><p>${esc(friendlyError(e))}</p><button class="btn primary" onclick="go('home')">Accueil</button></div>`}
+  };
+
+  const SL41_renderStore=window.renderStore;
+  window.renderStore=function(){
+    SL41_renderStore();document.querySelector('#csearch')?.remove();const s=state.publicShop||{},t=sl41Theme(s),page=document.querySelector('.storePage');if(page){page.style.setProperty('--sl-primary',t.primary_color);page.style.setProperty('--sl-secondary',t.secondary_color);page.style.setProperty('--sl-bg',t.background_color);page.style.setProperty('--sl-surface',t.surface_color);page.style.setProperty('--sl-text',t.text_color);page.style.setProperty('--sl-header',t.header_color);page.style.setProperty('--sl-btntext',t.button_text_color)}
+    const av=document.querySelector('.avatar');if(av&&s.logo_url)av.innerHTML=`<img src="${attr(s.logo_url)}" alt="${attr(s.name||'Logo')}">`;
+    const top=document.querySelector('.catalog .topRow');if(top&&!document.querySelector('#sl41PublicTools')){top.querySelector('#catalogFilter')?.remove();top.insertAdjacentHTML('afterend',`<div class="sl41-publicTools" id="sl41PublicTools"><input id="sl41CatalogQ" placeholder="Rechercher un produit…" oninput="sl41FilterCatalog()"><select id="sl41CatalogCat" onchange="sl41FilterCatalog()"><option value="">Toutes les catégories</option>${[...new Set((state.publicProducts||[]).map(x=>x.category).filter(Boolean))].map(c=>`<option value="${attr(c)}">${esc(c)}</option>`).join('')}</select><select id="sl41CatalogSort" onchange="sl41FilterCatalog()"><option value="recent">Plus récents</option><option value="price_asc">Prix croissant</option><option value="price_desc">Prix décroissant</option><option value="name">Nom A–Z</option></select></div>`)}
+  };
+  window.sl41FilterCatalog=function(){const q=(document.querySelector('#sl41CatalogQ')?.value||'').trim().toLowerCase(),cat=document.querySelector('#sl41CatalogCat')?.value||'',sort=document.querySelector('#sl41CatalogSort')?.value||'recent';let a=(state.publicProducts||[]).filter(p=>(!q||`${p.name||''} ${p.description||''}`.toLowerCase().includes(q))&&(!cat||p.category===cat));if(sort==='price_asc')a.sort((x,y)=>Number(x.price)-Number(y.price));if(sort==='price_desc')a.sort((x,y)=>Number(y.price)-Number(x.price));if(sort==='name')a.sort((x,y)=>String(x.name).localeCompare(String(y.name),'fr'));const g=document.querySelector('#catalogGrid');if(g)g.innerHTML=catalogCards(a)||'<div class="sl41-empty">Aucun produit trouvé.</div>'};
+
+  window.checkout=function(){
+    if(window.slsecShopReady&&!window.slsecShopReady(state.publicShop))return toast('Cette boutique n’est pas encore prête à recevoir des commandes.');
+    if(!state.publicShop?.is_open)return toast('Cette boutique est fermée actuellement.');if(!state.cart.length)return toast('Votre panier est vide.');
+    document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="modal"><div class="modalBox"><div class="panelHead"><h2>Finaliser la commande</h2><button class="modalX" onclick="document.querySelector('#modal').remove()">×</button></div><div class="cartLines" id="checkoutCartLines">${cartLinesHtml()}</div><div class="field"><label>Mode de réception</label><select id="slxMode"><option value="À convenir">À convenir avec le vendeur</option><option value="Livraison">Livraison</option><option value="À emporter">À emporter</option><option value="Sur place">Sur place</option><option value="Retrait / rendez-vous">Retrait / rendez-vous</option></select></div><div class="twoCols"><div class="field"><label>Votre nom</label><input id="cName" autocomplete="name" placeholder="Nom complet"></div><div class="field"><label>Téléphone</label><input id="cPhone" inputmode="tel" autocomplete="tel" placeholder="06XXXXXXXX"></div></div><div class="twoCols"><div class="field"><label>Ville</label><input id="cCity" autocomplete="address-level2" value="${attr(state.publicShop?.city||'')}" placeholder="Ex: Salé"></div><div class="field"><label>Adresse</label><input id="cAddress" autocomplete="street-address" placeholder="Quartier, rue, lieu…"></div></div><button type="button" id="slxGpsBtn" class="btn soft full" onclick="slxUseLocation()">📍 Utiliser ma localisation pour l’adresse</button><div class="field"><label>Note (optionnel)</label><textarea id="cNote" rows="3" placeholder="Taille, couleur, détails…"></textarea></div><div class="modalActions"><button class="btn soft" onclick="document.querySelector('#modal').remove()">Annuler</button><button id="orderBtn" class="btn primary" onclick="placeOrder()">Confirmer la commande</button></div></div></div>`)
+  };
+
+  window.slxSavePublicOrder=async function(order){
+    if(!REMOTE){if(state.publicShop.slug===state.shop.slug){const local={id:crypto.randomUUID(),order_number:Math.random().toString(36).slice(2,10).toUpperCase(),...order,phone:String(order.phone).slice(0,3)+'•••••'+String(order.phone).slice(-2),contact_unlocked:false,created_at:new Date().toISOString()};state.orders.unshift(local);DB.set('sl_orders',state.orders);return local}return {id:crypto.randomUUID()}}
+    return api('/rest/v1/rpc/place_public_order_v2',{method:'POST',auth:!!state.session,body:{p_shop_id:order.shop_id,p_customer_name:order.customer_name,p_phone:order.phone,p_city:order.city,p_address:order.address,p_delivery_method:order.delivery_method,p_note:order.note,p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))}})
+  };
+  let sl54OtpState=null;
+  function sl54PhoneE164(v=''){
+    let d=String(v||'').replace(/\D/g,'');
+    if(d.startsWith('00'))d=d.slice(2);
+    if(d.startsWith('0'))d='212'+d.slice(1);
+    if(!d.startsWith('212'))return '';
+    return '+'+d;
+  }
+  function sl54MaskPhone(v=''){
+    const d=String(v||'').replace(/\D/g,'');
+    if(d.length<6)return '••••••••';
+    return d.slice(0,3)+' •• •• •• '+d.slice(-2);
+  }
+  function sl54OtpModal(message=''){
+    const s=sl54OtpState;if(!s)return;
+    document.querySelector('#modal')?.remove();
+    document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="modal"><div class="modalBox successBox"><div class="successIcon">🔐</div><h2>Vérifiez votre téléphone</h2><p>Un code OTP doit être confirmé pour valider la commande <b>#${esc(s.ref||'')}</b>.</p><p class="sub">Numéro : ${esc(sl54MaskPhone(s.phone))}. Sans vérification, le vendeur ne peut pas payer 5 DH ni voir vos coordonnées.</p>${message?`<div class="slsec-warn">${esc(message)}</div>`:''}<div class="field" style="text-align:left;margin-top:16px"><label>Code à 6 chiffres</label><input id="sl54OtpCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456"></div><button id="sl54VerifyBtn" class="btn primary full" onclick="sl54VerifyOtp()">Vérifier la commande</button><button class="btn soft full" style="margin-top:8px" onclick="sl54SendOtp()">Renvoyer le code</button><button class="btn soft full" style="margin-top:8px" onclick="document.querySelector('#modal')?.remove()">Plus tard</button></div></div>`);
+  }
+  window.sl54SendOtp=async function(){
+    const s=sl54OtpState;if(!s)return;
+    if(s.testMode===true){
+      sl54OtpModal('Mode test activé. Entrez votre code test privé.');
+      return;
+    }
+    const e164=sl54PhoneE164(s.phone);if(!e164)return toast('Numéro invalide.');
+    try{
+      const r=await fetch(SUPABASE_URL+'/auth/v1/otp',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({phone:e164})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.msg||d.message||d.error_description||'Service SMS indisponible');
+      sl54OtpModal('Code envoyé. Il expire rapidement.');
+    }catch(e){
+      sl54OtpModal('Le service SMS OTP n’est pas encore configuré. Pour vos essais, utilisez votre code test privé.');
+    }
+  };
+  window.sl54VerifyOtp=async function(){
+    const s=sl54OtpState;if(!s)return;
+    const token=(document.querySelector('#sl54OtpCode')?.value||'').replace(/\D/g,'');
+    if(token.length!==6)return toast('Entrez le code OTP à 6 chiffres.');
+    setBusy('#sl54VerifyBtn',true,'Vérification…');
+    let access='';
+    try{
+      if(token==='739521'){
+        await api('/rest/v1/rpc/verify_order_phone_test',{method:'POST',body:{p_order_id:s.orderId,p_code:token}});
+      }else{
+        const e164=sl54PhoneE164(s.phone);
+        const vr=await fetch(SUPABASE_URL+'/auth/v1/verify',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({type:'sms',phone:e164,token})});
+        const vd=await vr.json().catch(()=>({}));
+        if(!vr.ok||!vd.access_token)throw new Error(vd.msg||vd.message||'Code incorrect ou expiré');
+        access=vd.access_token;
+        const rr=await fetch(SUPABASE_URL+'/rest/v1/rpc/verify_order_phone',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access,'Content-Type':'application/json'},body:JSON.stringify({p_order_id:s.orderId})});
+        const rd=await rr.json().catch(()=>({}));
+        if(!rr.ok)throw new Error(rd.message||rd.error||'Vérification impossible');
+        try{await fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access}})}catch{}
+      }
+      try{sessionStorage.removeItem('sl54_pending_order')}catch{}
+      document.querySelector('#modal')?.remove();
+      document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="modal"><div class="modalBox successBox"><div class="successIcon">✓</div><h2>Commande vérifiée !</h2><p>Merci ${esc(s.name)}. La commande <b>#${esc(s.ref||'')}</b> est maintenant confirmée par OTP.</p><p class="sub">Le vendeur peut maintenant choisir de débloquer vos coordonnées pour 5 DH.</p><button class="btn primary full" onclick="document.querySelector('#modal')?.remove()">Continuer</button></div></div>`);
+      sl54OtpState=null;
+    }catch(e){toast(friendlyError(e));setBusy('#sl54VerifyBtn',false,'Vérifier la commande')}
+  };
+  window.placeOrder=async function(){
+    const name=document.querySelector('#cName')?.value.trim()||'',phone=document.querySelector('#cPhone')?.value.trim()||'',city=document.querySelector('#cCity')?.value.trim()||'',address=document.querySelector('#cAddress')?.value.trim()||'',note=document.querySelector('#cNote')?.value.trim()||'',mode=document.querySelector('#slxMode')?.value||'À convenir';
+    if(name.length<2)return toast('Ajoutez votre nom.');if(!sl41PhoneOk(phone))return toast('Ajoutez un numéro marocain valide.');if(city.length<2)return toast('Ajoutez votre ville.');if(mode==='Livraison'&&address.length<3)return toast('Ajoutez une adresse de livraison.');
+    const order={shop_id:state.publicShop.id,customer_name:name,phone,city,address,delivery_method:mode,note,items:state.cart.map(p=>({product_id:p.id,name:p.name,qty:Number(p.qty||1),price:Number(p.price)}))};
+    setBusy('#orderBtn',true,'Envoi…');
+    try{
+      const result=await slxSavePublicOrder(order);
+      const ref=result?.order_number||String(result?.id||'').replace(/-/g,'').slice(0,8).toUpperCase();
+      state.cart=[];try{sessionStorage.removeItem(ckey())}catch{}
+      document.querySelector('#modal')?.remove();renderCart();
+      const signedInTest=!!(state.user?.id&&state.session);
+      sl54OtpState={orderId:result?.id,phone,name,ref,expiresAt:result?.verification_expires_at||'',testMode:signedInTest};
+      try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState))}catch{}
+      sl54OtpModal('Envoi du code OTP…');
+      await sl54SendOtp();
+    }catch(e){toast(friendlyError(e));setBusy('#orderBtn',false,'Confirmer la commande')}
+  };
+
+  window.shopUrl=function(slug){return `${location.origin}/store/${encodeURIComponent(slug||'ma-boutique')}`};
+  window.openMyStore=function(){if(window.slsecShopReady&&!window.slsecShopReady(state.shop)){toast('Complétez d’abord Ma boutique : nom, ville et numéro WhatsApp valide.');if(document.querySelector('#dashMain'))dashTab('shop');else{go('dashboard');setTimeout(()=>dashTab('shop'),80)}return}location.href=shopUrl(state.shop.slug)};
+  window.copyShopLink=async function(){if(window.slsecShopReady&&!window.slsecShopReady(state.shop)){toast('Complétez d’abord Ma boutique : nom, ville et numéro WhatsApp valide.');dashTab('shop');return}try{await navigator.clipboard.writeText(shopUrl(state.shop.slug));toast('Lien copié ✅')}catch{prompt('Copiez votre lien:',shopUrl(state.shop.slug))}};
+
+  async function sl41RenderAdmin(){
+    const m=document.querySelector('#dashMain');if(!m)return;if(!sl41.isAdmin){const ok=await sl41IsAdmin();if(!ok){m.innerHTML='<div class="panel"><h3>Accès non autorisé</h3></div>';return}}
+    m.innerHTML='<div class="topRow"><div><h1>Administration</h1><div class="sub">Contrôle global ShopLink Maroc</div></div><button class="btn soft" onclick="sl41RenderAdmin()">↻ Actualiser</button></div><div class="panel"><div class="empty">Chargement…</div></div>';
+    try{const [d,c]=await Promise.all([api('/rest/v1/rpc/get_admin_shop_dashboard',{method:'POST',auth:true,body:{}}),api('/rest/v1/rpc/get_admin_contact_dashboard',{method:'POST',auth:true,body:{}})]);sl41.admin=d||{};sl41.adminContacts=c||{};sl41.lastAdminLoad=Date.now();sl41PaintAdmin()}catch(e){m.innerHTML=`<div class="panel"><h3>Erreur</h3><p>${esc(friendlyError(e))}</p></div>`}
+  }
+  window.sl41RenderAdmin=sl41RenderAdmin;
+  function sl41PaintAdmin(){const m=document.querySelector('#dashMain'),d=sl41.admin||{},s=d.stats||{},cs=sl41.adminContacts?.stats||{},shops=d.shops||[],reports=d.reports||[],payments=sl41.adminContacts?.payments||[];if(!m)return;m.innerHTML=`<div class="topRow"><div><h1>Administration</h1><div class="sub">Boutiques, commandes, ventes, paiements et signalements</div></div><button class="btn soft" onclick="sl41RenderAdmin()">↻ Actualiser</button></div><div class="sl41-adminStats"><div><b>${Number(s.shops_total||0)}</b><span>Boutiques</span></div><div><b>${Number(s.shops_open||0)}</b><span>Ouvertes</span></div><div><b>${Number(s.products_total||0)}</b><span>Produits</span></div><div><b>${Number(s.orders_total||0)}</b><span>Commandes</span></div><div><b>${money(s.sales_total||0)}</b><span>Ventes</span></div><div><b>${money(cs.revenue_total||0)}</b><span>Revenus déblocage</span></div></div><div class="panel"><div class="panelHead"><h3>Toutes les boutiques</h3><span class="sub">${shops.length} résultat(s)</span></div><div class="sl41-adminTools"><input id="sl41AdminQ" placeholder="Nom, vendeur, e-mail, ville…" oninput="sl41FilterAdmin()"><select id="sl41AdminCity" onchange="sl41FilterAdmin()"><option value="">Toutes les villes</option>${[...new Set(shops.map(x=>x.city).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join('')}</select><select id="sl41AdminOpen" onchange="sl41FilterAdmin()"><option value="">Tous statuts</option><option value="open">Ouvertes</option><option value="closed">Fermées</option></select></div><div id="sl41AdminShops">${sl41AdminTable(shops)}</div></div><div class="panel"><div class="panelHead"><h3>Paiements de déblocage</h3><span class="sub">${payments.length} récent(s)</span></div>${sl41AdminPayments(payments)}</div><div class="panel"><div class="panelHead"><h3>Signalements récents</h3><span class="sub">${reports.length}</span></div>${reports.length?reports.map(r=>`<div class="sl41-report"><b>${esc(r.boutique_name||'Boutique')}</b>${r.product_name?` — ${esc(r.product_name)}`:''}<div>${esc(r.reason||'autre')} · ${formatDate(r.created_at)}</div><div class="sub">${esc(r.details||'Sans détail')}</div></div>`).join(''):'<div class="empty">Aucun signalement.</div>'}</div>`}
+  function sl41AdminPayments(rows){if(!rows.length)return '<div class="empty">Aucun paiement pour le moment.</div>';return `<div class="tableWrap"><table class="table"><thead><tr><th>Boutique</th><th>Montant</th><th>Statut</th><th>Prestataire</th><th>Date</th></tr></thead><tbody>${rows.slice(0,100).map(x=>`<tr><td><b>${esc(x.boutique_name||'Boutique')}</b><br><span class="sub">${esc(x.seller||'Vendeur')}</span></td><td><b>${money(x.amount||0)}</b></td><td><span class="sl41-adminBadge ${x.status==='succeeded'?'':'off'}">${esc(x.status||'pending')}</span></td><td>${esc(x.provider||'—')}</td><td>${formatDate(x.unlock_date||x.created_at)}</td></tr>`).join('')}</tbody></table></div>`}
+  function sl41AdminTable(rows){if(!rows.length)return '<div class="empty">Aucune boutique.</div>';return `<div class="tableWrap"><table class="table"><thead><tr><th>Boutique</th><th>Vendeur</th><th>Activité</th><th>Déblocages</th><th>État</th><th>Actions</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.name)}</b><br><span class="sub">${esc(x.city||'—')} · ${esc(x.category||'Autre')}</span><br><span class="sub">/store/${esc(x.slug)}</span></td><td>${esc(x.seller_name||'Vendeur')}<br><span class="sub">${esc(x.seller_email||'')}</span></td><td>${Number(x.products_count||0)} produits · ${Number(x.orders_count||0)} commandes<br><b>${money(x.sales_total||0)}</b>${Number(x.reports_count||0)?` · ⚑ ${Number(x.reports_count)}`:''}</td><td>${Number(x.contacts_unlocked_count||0)} débloqués<br><span class="sub">5 DH / contact</span></td><td><span class="sl41-adminBadge ${x.is_open?'':'off'}">${x.is_open?'Ouverte':'Fermée'}</span></td><td><div class="sl41-order-actions"><button class="btn soft sl41-mini" onclick="window.open('${shopUrl(x.slug)}','_blank')">Voir</button><button class="btn ${x.is_open?'soft':'primary'} sl41-mini" onclick="sl41AdminSetOpen('${x.id}',${x.is_open?'false':'true'})">${x.is_open?'Fermer':'Ouvrir'}</button></div></td></tr>`).join('')}</tbody></table></div>`}
+  window.sl41FilterAdmin=function(){const q=(document.querySelector('#sl41AdminQ')?.value||'').toLowerCase(),city=document.querySelector('#sl41AdminCity')?.value||'',st=document.querySelector('#sl41AdminOpen')?.value||'';const rows=(sl41.admin?.shops||[]).filter(x=>(!q||`${x.name||''} ${x.seller_name||''} ${x.seller_email||''} ${x.city||''} ${x.category||''}`.toLowerCase().includes(q))&&(!city||x.city===city)&&(!st||(st==='open'?x.is_open:!x.is_open)));const box=document.querySelector('#sl41AdminShops');if(box)box.innerHTML=sl41AdminTable(rows)};
+  window.sl41AdminSetOpen=async function(id,isOpen){try{await api('/rest/v1/rpc/admin_set_shop_open',{method:'POST',auth:true,body:{p_shop_id:id,p_is_open:isOpen}});toast(isOpen?'Boutique ouverte ✅':'Boutique fermée ✅');await sl41RenderAdmin()}catch(e){toast(friendlyError(e))}};
+
+  async function sl41Explore(){showLoader('Chargement des boutiques…');try{const rows=REMOTE?await api('/rest/v1/rpc/get_public_shops',{method:'POST',body:{}}):[state.shop];sl41.publicShops=Array.isArray(rows)?rows.map(normalizeShop):[];sl41PaintExplore()}catch(e){app.innerHTML=`<div class="centerError">${brand()}<h2>Impossible de charger les boutiques</h2><p>${esc(friendlyError(e))}</p><button class="btn primary" onclick="go('home')">Accueil</button></div>`}}
+  window.sl41Explore=sl41Explore;
+  const sl41MoroccoCities=["Casablanca","Rabat","Salé","Témara","Kénitra","Mohammedia","Marrakech","Fès","Meknès","Tanger","Tétouan","Agadir","Inezgane","Oujda","Nador","Berkane","El Jadida","Safi","Settat","Berrechid","Khouribga","Béni Mellal","Taza","Larache","Khémisset","Al Hoceima","Essaouira","Ouarzazate","Guelmim","Laâyoune","Dakhla"];
+  function sl41Norm(v=''){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase()}
+  function sl41PaintExplore(){const rows=sl41.publicShops||[];const cities=[...new Set([...sl41MoroccoCities,...rows.map(x=>x.city).filter(Boolean)])].sort((a,b)=>String(a).localeCompare(String(b),'fr'));const cats=[...new Set([...(Array.isArray(categories)?categories:[]),...rows.map(x=>x.category).filter(Boolean)])];app.innerHTML=`<div class="sl41-explore"><div class="storeNav"><div class="container">${brand()}<div class="storeNavActions"><button class="btn soft" onclick="go('home')">Accueil</button><button class="btn primary" onclick="location.href='/create-store'">Créer ma boutique</button></div></div></div><section class="sl41-exploreHero"><div class="container"><span class="badge">🇲🇦 Boutiques ShopLink Maroc</span><h1 style="font-size:clamp(34px,6vw,58px);margin:14px 0 8px">Découvrez des boutiques près de vous.</h1><p style="color:#b8c1bd">Recherchez par nom, ville ou catégorie et voyez celles qui sont ouvertes.</p></div></section><main class="container"><div class="sl41-publicTools" style="margin-top:24px"><input id="sl41ExploreQ" placeholder="Rechercher une boutique…" oninput="sl41FilterExplore()"><input id="sl41ExploreCity" list="sl41ExploreCityList" autocomplete="off" placeholder="Toutes les villes — écrire ou choisir" oninput="sl41FilterExplore()"><datalist id="sl41ExploreCityList">${cities.map(x=>`<option value="${attr(x)}"></option>`).join('')}</datalist><input id="sl41ExploreCat" list="sl41ExploreCatList" autocomplete="off" placeholder="Toutes les catégories — écrire ou choisir" oninput="sl41FilterExplore()"><datalist id="sl41ExploreCatList">${cats.map(x=>`<option value="${attr(x)}"></option>`).join('')}</datalist></div><label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="sl41ExploreOpen" onchange="sl41FilterExplore()"> Ouvert maintenant</label><div class="sl41-exploreGrid" id="sl41ExploreGrid">${sl41ExploreCards(rows)}</div></main></div>`}
+  function sl41ExploreCards(rows){if(!rows.length)return '<div class="sl41-empty">Aucune boutique trouvée.</div>';return rows.map(s=>`<article class="sl41-shopCard" style="border-top:4px solid ${validHex(s.primary_color)?s.primary_color:themeDefaults.primary_color}"><div class="sl41-shopIcon">${s.logo_url?`<img src="${attr(s.logo_url)}" alt="">`:esc(s.emoji||'🛍️')}</div><div><span class="sl41-adminBadge ${s.is_open?'':'off'}">${s.is_open?'Ouvert':'Fermé'}</span><h3 style="margin:8px 0 4px">${esc(s.name)}</h3><div class="sl41-shopMeta">${s.city?`<span>📍 ${esc(s.city)}</span>`:''}${s.category?`<span>${esc(s.category)}</span>`:''}</div></div><p class="sub" style="margin:0">${esc((s.description||'').slice(0,140))}</p><button class="btn primary full" onclick="location.href='${shopUrl(s.slug)}'">Voir la boutique</button></article>`).join('')}
+  window.sl41FilterExplore=function(){const q=sl41Norm(document.querySelector('#sl41ExploreQ')?.value||''),city=sl41Norm(document.querySelector('#sl41ExploreCity')?.value||''),cat=sl41Norm(document.querySelector('#sl41ExploreCat')?.value||''),open=!!document.querySelector('#sl41ExploreOpen')?.checked;const rows=(sl41.publicShops||[]).filter(s=>(!q||sl41Norm(`${s.name||''} ${s.description||''} ${s.city||''} ${s.category||''}`).includes(q))&&(!city||sl41Norm(s.city).includes(city))&&(!cat||sl41Norm(s.category).includes(cat))&&(!open||s.is_open));const g=document.querySelector('#sl41ExploreGrid');if(g)g.innerHTML=sl41ExploreCards(rows)};
+
+
+  // v44: all global navigation leaves deep /store/* and /create-store routes correctly.
+  window.go=function(route='home'){
+    const r=String(route||'home');
+    const target=r==='home'?'/' : '/#'+encodeURIComponent(r);
+    history.pushState(null,'',target);
+    return window.render();
+  };
+
+  const SL41_landing=window.landing;
+  window.landing=function(){SL41_landing();const actions=document.querySelector('.hero .actions');if(actions&&!actions.querySelector('.sl41-discover'))actions.insertAdjacentHTML('beforeend','<button class="btn ghost sl41-discover" onclick="go(\'explore\')">Découvrir les boutiques</button>');const nav=document.querySelector('.navlinks');if(nav&&!nav.querySelector('.sl41-nav-discover'))nav.insertAdjacentHTML('afterbegin','<a class="sl41-nav-discover" href="#explore" onclick="event.preventDefault();go(\'explore\')">Découvrir</a>')};
+
+  const SL41_auth=window.auth;
+  window.auth=function(mode){SL41_auth(mode);if(mode==='signup')setTimeout(sl41InjectTemplate,0)};
+  function sl41InjectTemplate(){const card=document.querySelector('.authCard');if(!card||document.querySelector('#sl41Template'))return;const btn=document.querySelector('#authBtn')||card.querySelector('.btn.primary');if(!btn)return;btn.insertAdjacentHTML('beforebegin',`<div class="field" id="sl41Template"><label>Type de boutique</label><select id="sl41TemplateValue"><option value="Restaurant">Restaurant</option><option value="Fashion">Mode / Fashion</option><option value="Products" selected>Produits / services</option></select></div>`)}
+  const SL41_submitAuth=window.submitAuth;
+  window.submitAuth=async function(mode){if(mode==='signup'){const v=document.querySelector('#sl41TemplateValue')?.value||'Products';try{localStorage.setItem('sl41_template',JSON.stringify({value:v,at:Date.now()}))}catch{}}return SL41_submitAuth(mode)};
+
+  const SL41_render=window.render;
+  window.render=async function(){const path=location.pathname.replace(/\/+$/,'')||'/';if(/^\/store\//i.test(path)){const slug=decodeURIComponent(path.split('/').filter(Boolean).slice(1).join('/'));return publicStore(slug)}if(path==='/create-store'){if(state.user)return dashboard();auth('signup');sl41InjectTemplate();return}const r=location.hash.slice(1);if(r==='explore')return sl41Explore();return SL41_render()};
+  window.addEventListener('popstate',()=>window.render());
+
+
+  window.addEventListener('hashchange',()=>{const r=location.hash.slice(1);if(r==='features'||r==='how')setTimeout(()=>document.getElementById(r)?.scrollIntoView({behavior:'smooth',block:'start'}),0)});
+
+  // Refresh the first screen after the final overrides are installed.
+  setTimeout(async()=>{try{if(REMOTE&&state.user){await loadSellerData(false)}await window.render()}catch(e){console.error('ShopLink v48 boot',e)}},120);
+})();
+</script>
+
 <style id="sl60-style">
 .sl60Bell{position:relative;min-width:42px;padding:9px 11px}
 .sl60BellCount{position:absolute;top:-5px;right:-5px;background:#ef4444;color:#fff;border-radius:999px;min-width:19px;height:19px;display:grid;place-items:center;font-size:10px;font-weight:900;border:2px solid #0c1310}
@@ -1290,175 +1462,4 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   render=window.render;
 })();
 </script>
-</body></html>`);w.document.close()};
-  async function sl41RefreshOrders(){if(!REMOTE){dashTab('orders');return}try{const rows=await api('/rest/v1/rpc/get_seller_orders',{method:'POST',auth:true,body:{}});state.orders=(Array.isArray(rows)?rows:[]).map(normalizeOrder);const shops=await api(`/rest/v1/shops?owner_id=eq.${encodeURIComponent(state.user.id)}&select=*`,{auth:true});if(shops[0])state.shop=normalizeShop(shops[0]);dashTab('orders')}catch(e){toast(friendlyError(e))}}
-  window.sl41RefreshOrders=sl41RefreshOrders;
-
-  function sl41PaymentModal(data,id){const configured=data?.provider_configured===true&&data?.checkout_url;document.querySelector('#sl41PayModal')?.remove();document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="sl41PayModal"><div class="modalBox"><div class="panelHead"><h2>Débloquer le contact</h2><button class="modalX" onclick="document.querySelector('#sl41PayModal').remove()">×</button></div>${configured?`<p>Le déblocage coûte <b>5 DH pour cette commande</b>. Après paiement, le téléphone, l’adresse et la localisation seront affichés.</p><div class="modalActions"><button class="btn soft" onclick="document.querySelector('#sl41PayModal').remove()">Plus tard</button><button class="btn primary" onclick="sl41OpenPayment('${id}','${attr(data.payment_id||'')}','${attr(data.checkout_url||'')}')">Payer 5 DH</button></div><button class="btn soft full" style="margin-top:10px" onclick="sl41VerifyUnlock('${id}')">Vérifier le paiement</button>`:`<div class="sl41-providerBox"><b>Paiement en ligne pas encore relié.</b><br>Le système 5 DH est prêt et sécurisé, mais un compte prestataire de paiement doit être connecté avant d’encaisser réellement. Aucun téléphone, adresse ou localisation ne sera affiché tant que le paiement de 5 DH de cette commande n’est pas confirmé.</div>`}</div></div>`)}
-  window.sl41OpenPayment=function(orderId,paymentId,raw){try{const u=new URL(raw,location.origin);if(paymentId&&!u.searchParams.has('payment_id'))u.searchParams.set('payment_id',paymentId);if(!u.searchParams.has('order_id'))u.searchParams.set('order_id',orderId);if(!u.searchParams.has('amount'))u.searchParams.set('amount','5');if(!u.searchParams.has('currency'))u.searchParams.set('currency','MAD');if(!u.searchParams.has('return_url'))u.searchParams.set('return_url',location.href);window.open(u.toString(),'_blank','noopener')}catch{window.open(raw,'_blank','noopener')}};
-  window.sl41VerifyUnlock=async function(id){document.querySelector('#sl41PayModal')?.remove();await sl41UnlockContact(id)};
-  window.sl41UnlockContact=async function(id){
-    try{const data=await api('/functions/v1/contact-unlock',{method:'POST',auth:true,body:{order_id:id}});if(data?.unlocked){const o=state.orders.find(x=>String(x.id)===String(id));if(o){o.contact_unlocked=true;o.phone=data.phone||o.phone;o.address=data.address||o.address||'';o.payment_status=data.payment_status||'succeeded';o.unlocked_at=new Date().toISOString()}toast('Contact débloqué ✅');await sl41RefreshOrders();return}sl41PaymentModal(data,id)}catch(e){toast(friendlyError(e))}
-  };
-
-  const SL41_publicStore=window.publicStore;
-  window.publicStore=async function(slug){
-    showLoader('Chargement de la boutique...');
-    try{
-      if(REMOTE){const rows=await api('/rest/v1/rpc/get_public_shop_by_slug',{method:'POST',body:{p_slug:slug}});const shop=Array.isArray(rows)?rows[0]:rows;if(!shop)return notFoundStore();state.publicShop=normalizeShop(shop);state.publicProducts=(await api(`/rest/v1/products?shop_id=eq.${state.publicShop.id}&is_active=eq.true&select=id,name,description,category,price,stock,emoji,image_url,is_active&order=created_at.desc`)).map(normalizeProduct)}
-      else return SL41_publicStore(slug);
-      renderStore();
-    }catch(e){app.innerHTML=`<div class="centerError">${brand()}<h2>Impossible de charger la boutique</h2><p>${esc(friendlyError(e))}</p><button class="btn primary" onclick="go('home')">Accueil</button></div>`}
-  };
-
-  const SL41_renderStore=window.renderStore;
-  window.renderStore=function(){
-    SL41_renderStore();document.querySelector('#csearch')?.remove();const s=state.publicShop||{},t=sl41Theme(s),page=document.querySelector('.storePage');if(page){page.style.setProperty('--sl-primary',t.primary_color);page.style.setProperty('--sl-secondary',t.secondary_color);page.style.setProperty('--sl-bg',t.background_color);page.style.setProperty('--sl-surface',t.surface_color);page.style.setProperty('--sl-text',t.text_color);page.style.setProperty('--sl-header',t.header_color);page.style.setProperty('--sl-btntext',t.button_text_color)}
-    const av=document.querySelector('.avatar');if(av&&s.logo_url)av.innerHTML=`<img src="${attr(s.logo_url)}" alt="${attr(s.name||'Logo')}">`;
-    const top=document.querySelector('.catalog .topRow');if(top&&!document.querySelector('#sl41PublicTools')){top.querySelector('#catalogFilter')?.remove();top.insertAdjacentHTML('afterend',`<div class="sl41-publicTools" id="sl41PublicTools"><input id="sl41CatalogQ" placeholder="Rechercher un produit…" oninput="sl41FilterCatalog()"><select id="sl41CatalogCat" onchange="sl41FilterCatalog()"><option value="">Toutes les catégories</option>${[...new Set((state.publicProducts||[]).map(x=>x.category).filter(Boolean))].map(c=>`<option value="${attr(c)}">${esc(c)}</option>`).join('')}</select><select id="sl41CatalogSort" onchange="sl41FilterCatalog()"><option value="recent">Plus récents</option><option value="price_asc">Prix croissant</option><option value="price_desc">Prix décroissant</option><option value="name">Nom A–Z</option></select></div>`)}
-  };
-  window.sl41FilterCatalog=function(){const q=(document.querySelector('#sl41CatalogQ')?.value||'').trim().toLowerCase(),cat=document.querySelector('#sl41CatalogCat')?.value||'',sort=document.querySelector('#sl41CatalogSort')?.value||'recent';let a=(state.publicProducts||[]).filter(p=>(!q||`${p.name||''} ${p.description||''}`.toLowerCase().includes(q))&&(!cat||p.category===cat));if(sort==='price_asc')a.sort((x,y)=>Number(x.price)-Number(y.price));if(sort==='price_desc')a.sort((x,y)=>Number(y.price)-Number(x.price));if(sort==='name')a.sort((x,y)=>String(x.name).localeCompare(String(y.name),'fr'));const g=document.querySelector('#catalogGrid');if(g)g.innerHTML=catalogCards(a)||'<div class="sl41-empty">Aucun produit trouvé.</div>'};
-
-  window.checkout=function(){
-    if(window.slsecShopReady&&!window.slsecShopReady(state.publicShop))return toast('Cette boutique n’est pas encore prête à recevoir des commandes.');
-    if(!state.publicShop?.is_open)return toast('Cette boutique est fermée actuellement.');if(!state.cart.length)return toast('Votre panier est vide.');
-    document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="modal"><div class="modalBox"><div class="panelHead"><h2>Finaliser la commande</h2><button class="modalX" onclick="document.querySelector('#modal').remove()">×</button></div><div class="cartLines" id="checkoutCartLines">${cartLinesHtml()}</div><div class="field"><label>Mode de réception</label><select id="slxMode"><option value="À convenir">À convenir avec le vendeur</option><option value="Livraison">Livraison</option><option value="À emporter">À emporter</option><option value="Sur place">Sur place</option><option value="Retrait / rendez-vous">Retrait / rendez-vous</option></select></div><div class="twoCols"><div class="field"><label>Votre nom</label><input id="cName" autocomplete="name" placeholder="Nom complet"></div><div class="field"><label>Téléphone</label><input id="cPhone" inputmode="tel" autocomplete="tel" placeholder="06XXXXXXXX"></div></div><div class="twoCols"><div class="field"><label>Ville</label><input id="cCity" autocomplete="address-level2" value="${attr(state.publicShop?.city||'')}" placeholder="Ex: Salé"></div><div class="field"><label>Adresse</label><input id="cAddress" autocomplete="street-address" placeholder="Quartier, rue, lieu…"></div></div><button type="button" id="slxGpsBtn" class="btn soft full" onclick="slxUseLocation()">📍 Utiliser ma localisation pour l’adresse</button><div class="field"><label>Note (optionnel)</label><textarea id="cNote" rows="3" placeholder="Taille, couleur, détails…"></textarea></div><div class="modalActions"><button class="btn soft" onclick="document.querySelector('#modal').remove()">Annuler</button><button id="orderBtn" class="btn primary" onclick="placeOrder()">Confirmer la commande</button></div></div></div>`)
-  };
-
-  window.slxSavePublicOrder=async function(order){
-    if(!REMOTE){if(state.publicShop.slug===state.shop.slug){const local={id:crypto.randomUUID(),order_number:Math.random().toString(36).slice(2,10).toUpperCase(),...order,phone:String(order.phone).slice(0,3)+'•••••'+String(order.phone).slice(-2),contact_unlocked:false,created_at:new Date().toISOString()};state.orders.unshift(local);DB.set('sl_orders',state.orders);return local}return {id:crypto.randomUUID()}}
-    return api('/rest/v1/rpc/place_public_order_v2',{method:'POST',auth:!!state.session,body:{p_shop_id:order.shop_id,p_customer_name:order.customer_name,p_phone:order.phone,p_city:order.city,p_address:order.address,p_delivery_method:order.delivery_method,p_note:order.note,p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))}})
-  };
-  let sl54OtpState=null;
-  function sl54PhoneE164(v=''){
-    let d=String(v||'').replace(/\D/g,'');
-    if(d.startsWith('00'))d=d.slice(2);
-    if(d.startsWith('0'))d='212'+d.slice(1);
-    if(!d.startsWith('212'))return '';
-    return '+'+d;
-  }
-  function sl54MaskPhone(v=''){
-    const d=String(v||'').replace(/\D/g,'');
-    if(d.length<6)return '••••••••';
-    return d.slice(0,3)+' •• •• •• '+d.slice(-2);
-  }
-  function sl54OtpModal(message=''){
-    const s=sl54OtpState;if(!s)return;
-    document.querySelector('#modal')?.remove();
-    document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="modal"><div class="modalBox successBox"><div class="successIcon">🔐</div><h2>Vérifiez votre téléphone</h2><p>Un code OTP doit être confirmé pour valider la commande <b>#${esc(s.ref||'')}</b>.</p><p class="sub">Numéro : ${esc(sl54MaskPhone(s.phone))}. Sans vérification, le vendeur ne peut pas payer 5 DH ni voir vos coordonnées.</p>${message?`<div class="slsec-warn">${esc(message)}</div>`:''}<div class="field" style="text-align:left;margin-top:16px"><label>Code à 6 chiffres</label><input id="sl54OtpCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="123456"></div><button id="sl54VerifyBtn" class="btn primary full" onclick="sl54VerifyOtp()">Vérifier la commande</button><button class="btn soft full" style="margin-top:8px" onclick="sl54SendOtp()">Renvoyer le code</button><button class="btn soft full" style="margin-top:8px" onclick="document.querySelector('#modal')?.remove()">Plus tard</button></div></div>`);
-  }
-  window.sl54SendOtp=async function(){
-    const s=sl54OtpState;if(!s)return;
-    if(s.testMode===true){
-      sl54OtpModal('Mode test activé. Entrez votre code test privé.');
-      return;
-    }
-    const e164=sl54PhoneE164(s.phone);if(!e164)return toast('Numéro invalide.');
-    try{
-      const r=await fetch(SUPABASE_URL+'/auth/v1/otp',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({phone:e164})});
-      const d=await r.json().catch(()=>({}));
-      if(!r.ok)throw new Error(d.msg||d.message||d.error_description||'Service SMS indisponible');
-      sl54OtpModal('Code envoyé. Il expire rapidement.');
-    }catch(e){
-      sl54OtpModal('Le service SMS OTP n’est pas encore configuré. Pour vos essais, utilisez votre code test privé.');
-    }
-  };
-  window.sl54VerifyOtp=async function(){
-    const s=sl54OtpState;if(!s)return;
-    const token=(document.querySelector('#sl54OtpCode')?.value||'').replace(/\D/g,'');
-    if(token.length!==6)return toast('Entrez le code OTP à 6 chiffres.');
-    setBusy('#sl54VerifyBtn',true,'Vérification…');
-    let access='';
-    try{
-      if(token==='739521'){
-        await api('/rest/v1/rpc/verify_order_phone_test',{method:'POST',body:{p_order_id:s.orderId,p_code:token}});
-      }else{
-        const e164=sl54PhoneE164(s.phone);
-        const vr=await fetch(SUPABASE_URL+'/auth/v1/verify',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({type:'sms',phone:e164,token})});
-        const vd=await vr.json().catch(()=>({}));
-        if(!vr.ok||!vd.access_token)throw new Error(vd.msg||vd.message||'Code incorrect ou expiré');
-        access=vd.access_token;
-        const rr=await fetch(SUPABASE_URL+'/rest/v1/rpc/verify_order_phone',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access,'Content-Type':'application/json'},body:JSON.stringify({p_order_id:s.orderId})});
-        const rd=await rr.json().catch(()=>({}));
-        if(!rr.ok)throw new Error(rd.message||rd.error||'Vérification impossible');
-        try{await fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access}})}catch{}
-      }
-      try{sessionStorage.removeItem('sl54_pending_order')}catch{}
-      document.querySelector('#modal')?.remove();
-      document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="modal"><div class="modalBox successBox"><div class="successIcon">✓</div><h2>Commande vérifiée !</h2><p>Merci ${esc(s.name)}. La commande <b>#${esc(s.ref||'')}</b> est maintenant confirmée par OTP.</p><p class="sub">Le vendeur peut maintenant choisir de débloquer vos coordonnées pour 5 DH.</p><button class="btn primary full" onclick="document.querySelector('#modal')?.remove()">Continuer</button></div></div>`);
-      sl54OtpState=null;
-    }catch(e){toast(friendlyError(e));setBusy('#sl54VerifyBtn',false,'Vérifier la commande')}
-  };
-  window.placeOrder=async function(){
-    const name=document.querySelector('#cName')?.value.trim()||'',phone=document.querySelector('#cPhone')?.value.trim()||'',city=document.querySelector('#cCity')?.value.trim()||'',address=document.querySelector('#cAddress')?.value.trim()||'',note=document.querySelector('#cNote')?.value.trim()||'',mode=document.querySelector('#slxMode')?.value||'À convenir';
-    if(name.length<2)return toast('Ajoutez votre nom.');if(!sl41PhoneOk(phone))return toast('Ajoutez un numéro marocain valide.');if(city.length<2)return toast('Ajoutez votre ville.');if(mode==='Livraison'&&address.length<3)return toast('Ajoutez une adresse de livraison.');
-    const order={shop_id:state.publicShop.id,customer_name:name,phone,city,address,delivery_method:mode,note,items:state.cart.map(p=>({product_id:p.id,name:p.name,qty:Number(p.qty||1),price:Number(p.price)}))};
-    setBusy('#orderBtn',true,'Envoi…');
-    try{
-      const result=await slxSavePublicOrder(order);
-      const ref=result?.order_number||String(result?.id||'').replace(/-/g,'').slice(0,8).toUpperCase();
-      state.cart=[];try{sessionStorage.removeItem(ckey())}catch{}
-      document.querySelector('#modal')?.remove();renderCart();
-      const signedInTest=!!(state.user?.id&&state.session);
-      sl54OtpState={orderId:result?.id,phone,name,ref,expiresAt:result?.verification_expires_at||'',testMode:signedInTest};
-      try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState))}catch{}
-      sl54OtpModal('Envoi du code OTP…');
-      await sl54SendOtp();
-    }catch(e){toast(friendlyError(e));setBusy('#orderBtn',false,'Confirmer la commande')}
-  };
-
-  window.shopUrl=function(slug){return `${location.origin}/store/${encodeURIComponent(slug||'ma-boutique')}`};
-  window.openMyStore=function(){if(window.slsecShopReady&&!window.slsecShopReady(state.shop)){toast('Complétez d’abord Ma boutique : nom, ville et numéro WhatsApp valide.');if(document.querySelector('#dashMain'))dashTab('shop');else{go('dashboard');setTimeout(()=>dashTab('shop'),80)}return}location.href=shopUrl(state.shop.slug)};
-  window.copyShopLink=async function(){if(window.slsecShopReady&&!window.slsecShopReady(state.shop)){toast('Complétez d’abord Ma boutique : nom, ville et numéro WhatsApp valide.');dashTab('shop');return}try{await navigator.clipboard.writeText(shopUrl(state.shop.slug));toast('Lien copié ✅')}catch{prompt('Copiez votre lien:',shopUrl(state.shop.slug))}};
-
-  async function sl41RenderAdmin(){
-    const m=document.querySelector('#dashMain');if(!m)return;if(!sl41.isAdmin){const ok=await sl41IsAdmin();if(!ok){m.innerHTML='<div class="panel"><h3>Accès non autorisé</h3></div>';return}}
-    m.innerHTML='<div class="topRow"><div><h1>Administration</h1><div class="sub">Contrôle global ShopLink Maroc</div></div><button class="btn soft" onclick="sl41RenderAdmin()">↻ Actualiser</button></div><div class="panel"><div class="empty">Chargement…</div></div>';
-    try{const [d,c]=await Promise.all([api('/rest/v1/rpc/get_admin_shop_dashboard',{method:'POST',auth:true,body:{}}),api('/rest/v1/rpc/get_admin_contact_dashboard',{method:'POST',auth:true,body:{}})]);sl41.admin=d||{};sl41.adminContacts=c||{};sl41.lastAdminLoad=Date.now();sl41PaintAdmin()}catch(e){m.innerHTML=`<div class="panel"><h3>Erreur</h3><p>${esc(friendlyError(e))}</p></div>`}
-  }
-  window.sl41RenderAdmin=sl41RenderAdmin;
-  function sl41PaintAdmin(){const m=document.querySelector('#dashMain'),d=sl41.admin||{},s=d.stats||{},cs=sl41.adminContacts?.stats||{},shops=d.shops||[],reports=d.reports||[],payments=sl41.adminContacts?.payments||[];if(!m)return;m.innerHTML=`<div class="topRow"><div><h1>Administration</h1><div class="sub">Boutiques, commandes, ventes, paiements et signalements</div></div><button class="btn soft" onclick="sl41RenderAdmin()">↻ Actualiser</button></div><div class="sl41-adminStats"><div><b>${Number(s.shops_total||0)}</b><span>Boutiques</span></div><div><b>${Number(s.shops_open||0)}</b><span>Ouvertes</span></div><div><b>${Number(s.products_total||0)}</b><span>Produits</span></div><div><b>${Number(s.orders_total||0)}</b><span>Commandes</span></div><div><b>${money(s.sales_total||0)}</b><span>Ventes</span></div><div><b>${money(cs.revenue_total||0)}</b><span>Revenus déblocage</span></div></div><div class="panel"><div class="panelHead"><h3>Toutes les boutiques</h3><span class="sub">${shops.length} résultat(s)</span></div><div class="sl41-adminTools"><input id="sl41AdminQ" placeholder="Nom, vendeur, e-mail, ville…" oninput="sl41FilterAdmin()"><select id="sl41AdminCity" onchange="sl41FilterAdmin()"><option value="">Toutes les villes</option>${[...new Set(shops.map(x=>x.city).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join('')}</select><select id="sl41AdminOpen" onchange="sl41FilterAdmin()"><option value="">Tous statuts</option><option value="open">Ouvertes</option><option value="closed">Fermées</option></select></div><div id="sl41AdminShops">${sl41AdminTable(shops)}</div></div><div class="panel"><div class="panelHead"><h3>Paiements de déblocage</h3><span class="sub">${payments.length} récent(s)</span></div>${sl41AdminPayments(payments)}</div><div class="panel"><div class="panelHead"><h3>Signalements récents</h3><span class="sub">${reports.length}</span></div>${reports.length?reports.map(r=>`<div class="sl41-report"><b>${esc(r.boutique_name||'Boutique')}</b>${r.product_name?` — ${esc(r.product_name)}`:''}<div>${esc(r.reason||'autre')} · ${formatDate(r.created_at)}</div><div class="sub">${esc(r.details||'Sans détail')}</div></div>`).join(''):'<div class="empty">Aucun signalement.</div>'}</div>`}
-  function sl41AdminPayments(rows){if(!rows.length)return '<div class="empty">Aucun paiement pour le moment.</div>';return `<div class="tableWrap"><table class="table"><thead><tr><th>Boutique</th><th>Montant</th><th>Statut</th><th>Prestataire</th><th>Date</th></tr></thead><tbody>${rows.slice(0,100).map(x=>`<tr><td><b>${esc(x.boutique_name||'Boutique')}</b><br><span class="sub">${esc(x.seller||'Vendeur')}</span></td><td><b>${money(x.amount||0)}</b></td><td><span class="sl41-adminBadge ${x.status==='succeeded'?'':'off'}">${esc(x.status||'pending')}</span></td><td>${esc(x.provider||'—')}</td><td>${formatDate(x.unlock_date||x.created_at)}</td></tr>`).join('')}</tbody></table></div>`}
-  function sl41AdminTable(rows){if(!rows.length)return '<div class="empty">Aucune boutique.</div>';return `<div class="tableWrap"><table class="table"><thead><tr><th>Boutique</th><th>Vendeur</th><th>Activité</th><th>Déblocages</th><th>État</th><th>Actions</th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.name)}</b><br><span class="sub">${esc(x.city||'—')} · ${esc(x.category||'Autre')}</span><br><span class="sub">/store/${esc(x.slug)}</span></td><td>${esc(x.seller_name||'Vendeur')}<br><span class="sub">${esc(x.seller_email||'')}</span></td><td>${Number(x.products_count||0)} produits · ${Number(x.orders_count||0)} commandes<br><b>${money(x.sales_total||0)}</b>${Number(x.reports_count||0)?` · ⚑ ${Number(x.reports_count)}`:''}</td><td>${Number(x.contacts_unlocked_count||0)} débloqués<br><span class="sub">5 DH / contact</span></td><td><span class="sl41-adminBadge ${x.is_open?'':'off'}">${x.is_open?'Ouverte':'Fermée'}</span></td><td><div class="sl41-order-actions"><button class="btn soft sl41-mini" onclick="window.open('${shopUrl(x.slug)}','_blank')">Voir</button><button class="btn ${x.is_open?'soft':'primary'} sl41-mini" onclick="sl41AdminSetOpen('${x.id}',${x.is_open?'false':'true'})">${x.is_open?'Fermer':'Ouvrir'}</button></div></td></tr>`).join('')}</tbody></table></div>`}
-  window.sl41FilterAdmin=function(){const q=(document.querySelector('#sl41AdminQ')?.value||'').toLowerCase(),city=document.querySelector('#sl41AdminCity')?.value||'',st=document.querySelector('#sl41AdminOpen')?.value||'';const rows=(sl41.admin?.shops||[]).filter(x=>(!q||`${x.name||''} ${x.seller_name||''} ${x.seller_email||''} ${x.city||''} ${x.category||''}`.toLowerCase().includes(q))&&(!city||x.city===city)&&(!st||(st==='open'?x.is_open:!x.is_open)));const box=document.querySelector('#sl41AdminShops');if(box)box.innerHTML=sl41AdminTable(rows)};
-  window.sl41AdminSetOpen=async function(id,isOpen){try{await api('/rest/v1/rpc/admin_set_shop_open',{method:'POST',auth:true,body:{p_shop_id:id,p_is_open:isOpen}});toast(isOpen?'Boutique ouverte ✅':'Boutique fermée ✅');await sl41RenderAdmin()}catch(e){toast(friendlyError(e))}};
-
-  async function sl41Explore(){showLoader('Chargement des boutiques…');try{const rows=REMOTE?await api('/rest/v1/rpc/get_public_shops',{method:'POST',body:{}}):[state.shop];sl41.publicShops=Array.isArray(rows)?rows.map(normalizeShop):[];sl41PaintExplore()}catch(e){app.innerHTML=`<div class="centerError">${brand()}<h2>Impossible de charger les boutiques</h2><p>${esc(friendlyError(e))}</p><button class="btn primary" onclick="go('home')">Accueil</button></div>`}}
-  window.sl41Explore=sl41Explore;
-  const sl41MoroccoCities=["Casablanca","Rabat","Salé","Témara","Kénitra","Mohammedia","Marrakech","Fès","Meknès","Tanger","Tétouan","Agadir","Inezgane","Oujda","Nador","Berkane","El Jadida","Safi","Settat","Berrechid","Khouribga","Béni Mellal","Taza","Larache","Khémisset","Al Hoceima","Essaouira","Ouarzazate","Guelmim","Laâyoune","Dakhla"];
-  function sl41Norm(v=''){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase()}
-  function sl41PaintExplore(){const rows=sl41.publicShops||[];const cities=[...new Set([...sl41MoroccoCities,...rows.map(x=>x.city).filter(Boolean)])].sort((a,b)=>String(a).localeCompare(String(b),'fr'));const cats=[...new Set([...(Array.isArray(categories)?categories:[]),...rows.map(x=>x.category).filter(Boolean)])];app.innerHTML=`<div class="sl41-explore"><div class="storeNav"><div class="container">${brand()}<div class="storeNavActions"><button class="btn soft" onclick="go('home')">Accueil</button><button class="btn primary" onclick="location.href='/create-store'">Créer ma boutique</button></div></div></div><section class="sl41-exploreHero"><div class="container"><span class="badge">🇲🇦 Boutiques ShopLink Maroc</span><h1 style="font-size:clamp(34px,6vw,58px);margin:14px 0 8px">Découvrez des boutiques près de vous.</h1><p style="color:#b8c1bd">Recherchez par nom, ville ou catégorie et voyez celles qui sont ouvertes.</p></div></section><main class="container"><div class="sl41-publicTools" style="margin-top:24px"><input id="sl41ExploreQ" placeholder="Rechercher une boutique…" oninput="sl41FilterExplore()"><input id="sl41ExploreCity" list="sl41ExploreCityList" autocomplete="off" placeholder="Toutes les villes — écrire ou choisir" oninput="sl41FilterExplore()"><datalist id="sl41ExploreCityList">${cities.map(x=>`<option value="${attr(x)}"></option>`).join('')}</datalist><input id="sl41ExploreCat" list="sl41ExploreCatList" autocomplete="off" placeholder="Toutes les catégories — écrire ou choisir" oninput="sl41FilterExplore()"><datalist id="sl41ExploreCatList">${cats.map(x=>`<option value="${attr(x)}"></option>`).join('')}</datalist></div><label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="sl41ExploreOpen" onchange="sl41FilterExplore()"> Ouvert maintenant</label><div class="sl41-exploreGrid" id="sl41ExploreGrid">${sl41ExploreCards(rows)}</div></main></div>`}
-  function sl41ExploreCards(rows){if(!rows.length)return '<div class="sl41-empty">Aucune boutique trouvée.</div>';return rows.map(s=>`<article class="sl41-shopCard" style="border-top:4px solid ${validHex(s.primary_color)?s.primary_color:themeDefaults.primary_color}"><div class="sl41-shopIcon">${s.logo_url?`<img src="${attr(s.logo_url)}" alt="">`:esc(s.emoji||'🛍️')}</div><div><span class="sl41-adminBadge ${s.is_open?'':'off'}">${s.is_open?'Ouvert':'Fermé'}</span><h3 style="margin:8px 0 4px">${esc(s.name)}</h3><div class="sl41-shopMeta">${s.city?`<span>📍 ${esc(s.city)}</span>`:''}${s.category?`<span>${esc(s.category)}</span>`:''}</div></div><p class="sub" style="margin:0">${esc((s.description||'').slice(0,140))}</p><button class="btn primary full" onclick="location.href='${shopUrl(s.slug)}'">Voir la boutique</button></article>`).join('')}
-  window.sl41FilterExplore=function(){const q=sl41Norm(document.querySelector('#sl41ExploreQ')?.value||''),city=sl41Norm(document.querySelector('#sl41ExploreCity')?.value||''),cat=sl41Norm(document.querySelector('#sl41ExploreCat')?.value||''),open=!!document.querySelector('#sl41ExploreOpen')?.checked;const rows=(sl41.publicShops||[]).filter(s=>(!q||sl41Norm(`${s.name||''} ${s.description||''} ${s.city||''} ${s.category||''}`).includes(q))&&(!city||sl41Norm(s.city).includes(city))&&(!cat||sl41Norm(s.category).includes(cat))&&(!open||s.is_open));const g=document.querySelector('#sl41ExploreGrid');if(g)g.innerHTML=sl41ExploreCards(rows)};
-
-
-  // v44: all global navigation leaves deep /store/* and /create-store routes correctly.
-  window.go=function(route='home'){
-    const r=String(route||'home');
-    const target=r==='home'?'/' : '/#'+encodeURIComponent(r);
-    history.pushState(null,'',target);
-    return window.render();
-  };
-
-  const SL41_landing=window.landing;
-  window.landing=function(){SL41_landing();const actions=document.querySelector('.hero .actions');if(actions&&!actions.querySelector('.sl41-discover'))actions.insertAdjacentHTML('beforeend','<button class="btn ghost sl41-discover" onclick="go(\'explore\')">Découvrir les boutiques</button>');const nav=document.querySelector('.navlinks');if(nav&&!nav.querySelector('.sl41-nav-discover'))nav.insertAdjacentHTML('afterbegin','<a class="sl41-nav-discover" href="#explore" onclick="event.preventDefault();go(\'explore\')">Découvrir</a>')};
-
-  const SL41_auth=window.auth;
-  window.auth=function(mode){SL41_auth(mode);if(mode==='signup')setTimeout(sl41InjectTemplate,0)};
-  function sl41InjectTemplate(){const card=document.querySelector('.authCard');if(!card||document.querySelector('#sl41Template'))return;const btn=document.querySelector('#authBtn')||card.querySelector('.btn.primary');if(!btn)return;btn.insertAdjacentHTML('beforebegin',`<div class="field" id="sl41Template"><label>Type de boutique</label><select id="sl41TemplateValue"><option value="Restaurant">Restaurant</option><option value="Fashion">Mode / Fashion</option><option value="Products" selected>Produits / services</option></select></div>`)}
-  const SL41_submitAuth=window.submitAuth;
-  window.submitAuth=async function(mode){if(mode==='signup'){const v=document.querySelector('#sl41TemplateValue')?.value||'Products';try{localStorage.setItem('sl41_template',JSON.stringify({value:v,at:Date.now()}))}catch{}}return SL41_submitAuth(mode)};
-
-  const SL41_render=window.render;
-  window.render=async function(){const path=location.pathname.replace(/\/+$/,'')||'/';if(/^\/store\//i.test(path)){const slug=decodeURIComponent(path.split('/').filter(Boolean).slice(1).join('/'));return publicStore(slug)}if(path==='/create-store'){if(state.user)return dashboard();auth('signup');sl41InjectTemplate();return}const r=location.hash.slice(1);if(r==='explore')return sl41Explore();return SL41_render()};
-  window.addEventListener('popstate',()=>window.render());
-
-
-  window.addEventListener('hashchange',()=>{const r=location.hash.slice(1);if(r==='features'||r==='how')setTimeout(()=>document.getElementById(r)?.scrollIntoView({behavior:'smooth',block:'start'}),0)});
-
-  // Refresh the first screen after the final overrides are installed.
-  setTimeout(async()=>{try{if(REMOTE&&state.user){await loadSellerData(false)}await window.render()}catch(e){console.error('ShopLink v48 boot',e)}},120);
-})();
-</script>
-
 </body></html>
