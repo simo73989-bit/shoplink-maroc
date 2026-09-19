@@ -1074,111 +1074,6 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
 
 
 
-<style id="sl85-policy-style">
-.sl85-policyBox{margin:14px 0;padding:13px 14px;border:1px solid #e5d38a;background:#fff9e8;border-radius:12px;color:#5e4a09;font-size:12px;line-height:1.55}
-.sl85-policyBox label{display:flex;gap:9px;align-items:flex-start}.sl85-policyBox input{margin-top:3px}.sl85-policyBox button{border:0;background:transparent;color:#166534;text-decoration:underline;font-weight:800;cursor:pointer;padding:0}
-.sl85-reportProduct{margin-top:10px;border:0;background:transparent;color:#6b7772;text-decoration:underline;font-size:11px;cursor:pointer;padding:4px 0}
-.sl85-reportProduct:hover{color:#b42318}
-.sl85-policyList{display:grid;gap:9px;margin:14px 0}.sl85-policyList div{padding:10px 12px;border-radius:10px;background:#f7f9f8;border:1px solid #e3e8e5}
-</style>
-<script id="sl85-categories-policy">
-(function(){
-  const disallowedLocal=/(^|[^a-z0-9_])(pistolet|revolver|fusil|arme a feu|arme à feu|firearm|gun|munition|munitions|ammunition|silencieux|silencer|grenade|dynamite|explosif|explosive|fireworks|cocaine|cocaïne|heroine|héroïne|methamphetamine|mdma|ecstasy|lsd|cannabis|marijuana|hashish|haschich|thc|psilocybin|cigarette|cigarettes|vape|vapotage|nicotine|tabac|vodka|whisky|whiskey|rhum|rum|beer|biere|bière|wine|vin|spyware|stalkerware|keylogger|malware|cyanure|cyanide|ricin|ivoire|ivory)([^a-z0-9_]|$)/i;
-
-  window.sl85PolicyModal=function(){
-    document.querySelector('#sl85PolicyModal')?.remove();
-    document.body.insertAdjacentHTML('beforeend',
-      '<div class="modal" id="sl85PolicyModal"><div class="modalBox">'+
-      '<div class="panelHead"><div><h2>Règles de vente ShopLink Maroc</h2><div class="sub">Les vendeurs doivent proposer uniquement des produits et services autorisés.</div></div><button class="modalX" onclick="document.querySelector(\'#sl85PolicyModal\').remove()">×</button></div>'+
-      '<div class="sl85-policyList">'+
-      '<div><b>Interdits :</b> armes et explosifs, drogues, alcool et nicotine, médicaments/substances réglementés, produits dangereux.</div>'+
-      '<div><b>Interdits :</b> contrefaçons, produits volés, fausse monnaie, contenus ou produits sexuels explicites, jeux d’argent et services de pari.</div>'+
-      '<div><b>Interdits :</b> logiciels malveillants/espions et commerce illégal d’espèces protégées ou produits issus de la faune protégée.</div>'+
-      '<div><b>Animaux de compagnie :</b> nourriture, accessoires, services et annonces légales sont permis. Les espèces protégées et le trafic d’animaux sont interdits.</div>'+
-      '<div><b>Modération :</b> toute annonce peut être signalée. ShopLink peut masquer ou supprimer une annonce et bloquer un compte en cas d’abus.</div>'+
-      '</div>'+
-      '<button class="btn primary full" onclick="document.querySelector(\'#sl85PolicyModal\').remove()">J’ai compris</button>'+
-      '</div></div>'
-    );
-  };
-
-  const oldOpen=window.openProductModal||openProductModal;
-  window.openProductModal=function(id=''){
-    oldOpen(id);
-    setTimeout(function(){
-      const modal=document.querySelector('#modal .modalBox');
-      if(!modal||modal.querySelector('#sl85PolicyAgree'))return;
-      const actions=modal.querySelector('.modalActions');
-      if(!actions)return;
-      actions.insertAdjacentHTML('beforebegin',
-        '<div class="sl85-policyBox"><label><input type="checkbox" id="sl85PolicyAgree"> <span>Je confirme que ce produit/service respecte les règles ShopLink Maroc et n’est pas interdit. <button type="button" onclick="sl85PolicyModal()">Voir les règles</button></span></label></div>'
-      );
-    },0);
-  };
-  openProductModal=window.openProductModal;
-
-  const oldSave=window.saveProduct||saveProduct;
-  window.saveProduct=async function(id=''){
-    if(!document.querySelector('#sl85PolicyAgree')?.checked){
-      return toast('Confirmez d’abord que le produit respecte les règles de vente.');
-    }
-    const name=document.querySelector('#pName')?.value.trim()||'';
-    const description=document.querySelector('#pDesc')?.value.trim()||'';
-    const category=document.querySelector('#pCategory')?.value||'Autre';
-
-    if(disallowedLocal.test((name+' '+description+' '+category).toLowerCase())){
-      return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
-    }
-
-    if(REMOTE){
-      try{
-        const check=await api('/rest/v1/rpc/check_product_policy',{method:'POST',auth:true,body:{p_name:name,p_description:description,p_category:category}});
-        if(check&&check.allowed===false)return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
-      }catch(e){
-        if(/product_not_allowed/i.test(String(e?.message||e||'')))return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
-        throw e;
-      }
-    }
-    return oldSave(id);
-  };
-  saveProduct=window.saveProduct;
-
-  // Final catalogue renderer: keep current shop behavior and add per-product reporting.
-  window.catalogCards=function(products){
-    return (products||[]).map(function(p){
-      const service=(p.category||'').toLowerCase()==='services'&&(p.stock===null||p.stock===undefined);
-      const disabled=!state.publicShop.is_open||(!service&&p.stock!==null&&Number(p.stock)<=0);
-      return '<article class="catalogCard" data-cat="'+attr(p.category||'')+'">'+
-        (p.image_url?'<div class="catalogImg photo"><img src="'+attr(p.image_url)+'" alt="'+attr(p.name)+'"></div>':'<div class="catalogImg">'+esc(p.emoji||'📦')+'</div>')+
-        '<div class="catalogBody"><div class="catalogCategory">'+(service?'🧰 Service':esc(p.category||''))+'</div>'+
-        '<h3>'+esc(p.name)+'</h3><p>'+esc(p.description||(service?'Service disponible':'Produit disponible'))+'</p>'+
-        '<div class="catalogBottom"><div><b class="price">'+money(p.price)+'</b>'+
-        (service?'<small class="stock">Sur demande</small>':(p.stock!==null&&p.stock!==undefined?'<small class="stock">'+(Number(p.stock)>0?Number(p.stock)+' en stock':'Rupture')+'</small>':''))+
-        '</div><button class="btn primary" '+(disabled?'disabled':'')+' onclick="addCartById(\''+String(p.id).replace(/'/g,'')+'\')">'+(service?'Choisir':'Ajouter')+'</button></div>'+
-        '<button type="button" class="sl85-reportProduct" onclick="event.stopPropagation();slsecReport(\''+String(p.id).replace(/'/g,'')+'\')">⚑ Signaler ce produit</button>'+
-        '</div></article>';
-    }).join('');
-  };
-  catalogCards=window.catalogCards;
-
-  const oldLanding=window.landing;
-  if(oldLanding){
-    window.landing=function(){
-      oldLanding();
-      const links=document.querySelector('.sl60FooterLinks')||document.querySelector('.footer');
-      if(links&&!links.querySelector('.sl85-rules-link')){
-        const b=document.createElement('button');
-        b.className='sl85-rules-link';
-        b.textContent='Règles de vente';
-        b.onclick=sl85PolicyModal;
-        links.appendChild(b);
-      }
-    };
-    landing=window.landing;
-  }
-})();
-</script>
-
 </body></html>`);w.document.close()};
   async function sl41RefreshOrders(){if(!REMOTE){dashTab('orders');return}try{const rows=await api('/rest/v1/rpc/get_seller_orders',{method:'POST',auth:true,body:{}});state.orders=(Array.isArray(rows)?rows:[]).map(normalizeOrder);const shops=await api(`/rest/v1/shops?owner_id=eq.${encodeURIComponent(state.user.id)}&select=*`,{auth:true});if(shops[0])state.shop=normalizeShop(shops[0]);dashTab('orders')}catch(e){toast(friendlyError(e))}}
   window.sl41RefreshOrders=sl41RefreshOrders;
@@ -1812,5 +1707,111 @@ window.addEventListener('pageshow',function(e){
   }
 });
 </script>
+
+<style id="sl85-policy-style">
+.sl85-policyBox{margin:14px 0;padding:13px 14px;border:1px solid #e5d38a;background:#fff9e8;border-radius:12px;color:#5e4a09;font-size:12px;line-height:1.55}
+.sl85-policyBox label{display:flex;gap:9px;align-items:flex-start}.sl85-policyBox input{margin-top:3px}.sl85-policyBox button{border:0;background:transparent;color:#166534;text-decoration:underline;font-weight:800;cursor:pointer;padding:0}
+.sl85-reportProduct{margin-top:10px;border:0;background:transparent;color:#6b7772;text-decoration:underline;font-size:11px;cursor:pointer;padding:4px 0}
+.sl85-reportProduct:hover{color:#b42318}
+.sl85-policyList{display:grid;gap:9px;margin:14px 0}.sl85-policyList div{padding:10px 12px;border-radius:10px;background:#f7f9f8;border:1px solid #e3e8e5}
+</style>
+<script id="sl85-categories-policy">
+(function(){
+  const disallowedLocal=/(^|[^a-z0-9_])(pistolet|revolver|fusil|arme a feu|arme à feu|firearm|gun|munition|munitions|ammunition|silencieux|silencer|grenade|dynamite|explosif|explosive|fireworks|cocaine|cocaïne|heroine|héroïne|methamphetamine|mdma|ecstasy|lsd|cannabis|marijuana|hashish|haschich|thc|psilocybin|cigarette|cigarettes|vape|vapotage|nicotine|tabac|vodka|whisky|whiskey|rhum|rum|beer|biere|bière|wine|vin|spyware|stalkerware|keylogger|malware|cyanure|cyanide|ricin|ivoire|ivory)([^a-z0-9_]|$)/i;
+
+  window.sl85PolicyModal=function(){
+    document.querySelector('#sl85PolicyModal')?.remove();
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="modal" id="sl85PolicyModal"><div class="modalBox">'+
+      '<div class="panelHead"><div><h2>Règles de vente ShopLink Maroc</h2><div class="sub">Les vendeurs doivent proposer uniquement des produits et services autorisés.</div></div><button class="modalX" onclick="document.querySelector(\'#sl85PolicyModal\').remove()">×</button></div>'+
+      '<div class="sl85-policyList">'+
+      '<div><b>Interdits :</b> armes et explosifs, drogues, alcool et nicotine, médicaments/substances réglementés, produits dangereux.</div>'+
+      '<div><b>Interdits :</b> contrefaçons, produits volés, fausse monnaie, contenus ou produits sexuels explicites, jeux d’argent et services de pari.</div>'+
+      '<div><b>Interdits :</b> logiciels malveillants/espions et commerce illégal d’espèces protégées ou produits issus de la faune protégée.</div>'+
+      '<div><b>Animaux de compagnie :</b> nourriture, accessoires, services et annonces légales sont permis. Les espèces protégées et le trafic d’animaux sont interdits.</div>'+
+      '<div><b>Modération :</b> toute annonce peut être signalée. ShopLink peut masquer ou supprimer une annonce et bloquer un compte en cas d’abus.</div>'+
+      '</div>'+
+      '<button class="btn primary full" onclick="document.querySelector(\'#sl85PolicyModal\').remove()">J’ai compris</button>'+
+      '</div></div>'
+    );
+  };
+
+  const oldOpen=window.openProductModal||openProductModal;
+  window.openProductModal=function(id=''){
+    oldOpen(id);
+    setTimeout(function(){
+      const modal=document.querySelector('#modal .modalBox');
+      if(!modal||modal.querySelector('#sl85PolicyAgree'))return;
+      const actions=modal.querySelector('.modalActions');
+      if(!actions)return;
+      actions.insertAdjacentHTML('beforebegin',
+        '<div class="sl85-policyBox"><label><input type="checkbox" id="sl85PolicyAgree"> <span>Je confirme que ce produit/service respecte les règles ShopLink Maroc et n’est pas interdit. <button type="button" onclick="sl85PolicyModal()">Voir les règles</button></span></label></div>'
+      );
+    },0);
+  };
+  openProductModal=window.openProductModal;
+
+  const oldSave=window.saveProduct||saveProduct;
+  window.saveProduct=async function(id=''){
+    if(!document.querySelector('#sl85PolicyAgree')?.checked){
+      return toast('Confirmez d’abord que le produit respecte les règles de vente.');
+    }
+    const name=document.querySelector('#pName')?.value.trim()||'';
+    const description=document.querySelector('#pDesc')?.value.trim()||'';
+    const category=document.querySelector('#pCategory')?.value||'Autre';
+
+    if(disallowedLocal.test((name+' '+description+' '+category).toLowerCase())){
+      return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
+    }
+
+    if(REMOTE){
+      try{
+        const check=await api('/rest/v1/rpc/check_product_policy',{method:'POST',auth:true,body:{p_name:name,p_description:description,p_category:category}});
+        if(check&&check.allowed===false)return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
+      }catch(e){
+        if(/product_not_allowed/i.test(String(e?.message||e||'')))return toast('Ce produit ou service n’est pas autorisé sur ShopLink Maroc.');
+        throw e;
+      }
+    }
+    return oldSave(id);
+  };
+  saveProduct=window.saveProduct;
+
+  // Final catalogue renderer: keep current shop behavior and add per-product reporting.
+  window.catalogCards=function(products){
+    return (products||[]).map(function(p){
+      const service=(p.category||'').toLowerCase()==='services'&&(p.stock===null||p.stock===undefined);
+      const disabled=!state.publicShop.is_open||(!service&&p.stock!==null&&Number(p.stock)<=0);
+      return '<article class="catalogCard" data-cat="'+attr(p.category||'')+'">'+
+        (p.image_url?'<div class="catalogImg photo"><img src="'+attr(p.image_url)+'" alt="'+attr(p.name)+'"></div>':'<div class="catalogImg">'+esc(p.emoji||'📦')+'</div>')+
+        '<div class="catalogBody"><div class="catalogCategory">'+(service?'🧰 Service':esc(p.category||''))+'</div>'+
+        '<h3>'+esc(p.name)+'</h3><p>'+esc(p.description||(service?'Service disponible':'Produit disponible'))+'</p>'+
+        '<div class="catalogBottom"><div><b class="price">'+money(p.price)+'</b>'+
+        (service?'<small class="stock">Sur demande</small>':(p.stock!==null&&p.stock!==undefined?'<small class="stock">'+(Number(p.stock)>0?Number(p.stock)+' en stock':'Rupture')+'</small>':''))+
+        '</div><button class="btn primary" '+(disabled?'disabled':'')+' onclick="addCartById(\''+String(p.id).replace(/'/g,'')+'\')">'+(service?'Choisir':'Ajouter')+'</button></div>'+
+        '<button type="button" class="sl85-reportProduct" onclick="event.stopPropagation();slsecReport(\''+String(p.id).replace(/'/g,'')+'\')">⚑ Signaler ce produit</button>'+
+        '</div></article>';
+    }).join('');
+  };
+  catalogCards=window.catalogCards;
+
+  const oldLanding=window.landing;
+  if(oldLanding){
+    window.landing=function(){
+      oldLanding();
+      const links=document.querySelector('.sl60FooterLinks')||document.querySelector('.footer');
+      if(links&&!links.querySelector('.sl85-rules-link')){
+        const b=document.createElement('button');
+        b.className='sl85-rules-link';
+        b.textContent='Règles de vente';
+        b.onclick=sl85PolicyModal;
+        links.appendChild(b);
+      }
+    };
+    landing=window.landing;
+  }
+})();
+</script>
+
 
 </body></html>
