@@ -1814,4 +1814,319 @@ window.addEventListener('pageshow',function(e){
 </script>
 
 
+
+<style id="sl86-style">
+.sl86-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.sl86-danger{border-color:#fecaca!important;background:#fffafa!important}.sl86-danger h3{color:#991b1b}
+.sl86-socials{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.sl86-socials a{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:999px;background:#ffffff12;border:1px solid #ffffff25;color:inherit;text-decoration:none;font-size:12px;font-weight:800}
+.sl86-reviews{padding:22px 0 44px}.sl86-reviewHead{display:flex;justify-content:space-between;gap:14px;align-items:end;margin-bottom:14px}.sl86-score{font-size:28px;font-weight:900}.sl86-stars{letter-spacing:2px;color:#d99a00}.sl86-reviewGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.sl86-reviewCard{background:var(--sl-surface,#fff);color:var(--sl-text,#111);border:1px solid #e2e8e4;border-radius:14px;padding:14px}.sl86-reviewCard p{margin:8px 0 0;line-height:1.45}.sl86-reviewCard small{color:#718078}
+.sl86-rateButtons{display:flex;gap:6px;justify-content:center;margin:14px 0}.sl86-rateButtons button{font-size:28px;border:0;background:transparent;cursor:pointer;opacity:.35}.sl86-rateButtons button.active{opacity:1}
+.sl86-reviewCta{margin-top:14px;display:flex;justify-content:flex-end}
+.sl86-reviewAdmin{display:grid;gap:10px}.sl86-reviewAdminRow{padding:12px;border:1px solid #e1e7e3;border-radius:12px;background:#fff}.sl86-reviewAdminHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.sl86-socialPanel .field small{display:block;margin-top:6px;color:#718078}
+@media(max-width:760px){.sl86-grid2,.sl86-reviewGrid{grid-template-columns:1fr}.sl86-reviewHead{align-items:flex-start;flex-direction:column}}
+</style>
+<script id="sl86-account-reviews-socials">
+(function(){
+  const SL86={reviewContext:null,publicReviews:null,socials:null};
+  window.SL86=SL86;
+
+  const oldFriendly=window.friendlyError;
+  window.friendlyError=function(e){
+    const m=String(e?.message||e||'');
+    if(/review_requires_verified_order/i.test(m))return 'La commande doit d’abord être vérifiée par code.';
+    if(/review_cancelled_order/i.test(m))return 'Une commande annulée ne peut pas recevoir un avis.';
+    if(/review_order_not_found/i.test(m))return 'Commande introuvable pour ce numéro.';
+    if(/invalid_rating/i.test(m))return 'Choisissez une note de 1 à 5 étoiles.';
+    if(/review_not_found/i.test(m))return 'Avis introuvable.';
+    return oldFriendly?oldFriendly(e):m;
+  };
+  friendlyError=window.friendlyError;
+
+  function sl86Stars(n){
+    const x=Math.max(0,Math.min(5,Math.round(Number(n)||0)));
+    return '★'.repeat(x)+'☆'.repeat(5-x);
+  }
+  function sl86SocialUrl(raw,type){
+    let v=String(raw||'').trim();
+    if(!v)return '';
+    if(type==='instagram'){
+      if(v.startsWith('@'))v='https://instagram.com/'+v.slice(1);
+      else if(!/^https?:\/\//i.test(v))v='https://instagram.com/'+v.replace(/^\/+|\/+$/g,'');
+    }
+    if(type==='facebook'){
+      if(v.startsWith('@'))v=v.slice(1);
+      if(!/^https?:\/\//i.test(v))v='https://facebook.com/'+v.replace(/^\/+|\/+$/g,'');
+    }
+    if(type==='tiktok'){
+      if(!/^https?:\/\//i.test(v)){
+        const h=v.replace(/^@/,'').replace(/^\/+|\/+$/g,'');
+        v='https://tiktok.com/@'+h;
+      }
+    }
+    try{
+      const u=new URL(v);
+      const h=u.hostname.replace(/^www\./,'').toLowerCase();
+      const ok=type==='instagram'?h==='instagram.com'||h.endsWith('.instagram.com'):
+               type==='facebook'?h==='facebook.com'||h.endsWith('.facebook.com')||h==='fb.com':
+               h==='tiktok.com'||h.endsWith('.tiktok.com');
+      return ok?u.href:'';
+    }catch{return ''}
+  }
+
+  window.sl86EnhanceAccount=function(){
+    const m=document.querySelector('#dashMain');
+    if(!m||m.querySelector('#sl86AccountExtras'))return;
+    const host=m.querySelector('.slxAccount')||m.querySelector('.panel');
+    if(!host)return;
+    host.insertAdjacentHTML('afterend',
+      '<div id="sl86AccountExtras">'+
+      '<div class="panel"><h3>Changer l\'e-mail</h3><p class="sub">Un lien de confirmation sera envoyé avant que la nouvelle adresse soit utilisée.</p><div class="field"><label>Nouvel e-mail</label><input id="sl86Email" type="email" value="'+attr(state.user?.email||'')+'" placeholder="vous@email.com"></div><button id="sl86EmailBtn" class="btn soft" onclick="sl86ChangeEmail()">Changer l\'e-mail</button></div>'+
+      '<div class="panel sl86-danger"><h3>Supprimer mon compte</h3><p class="sub">Cette action supprime votre boutique, vos produits et les données vendeur liées au compte. Elle est irréversible.</p><button id="sl86DeleteBtn" class="btn soft" onclick="sl86DeleteAccount()">Supprimer mon compte</button></div>'+
+      '</div>'
+    );
+  };
+
+  window.sl86ChangeEmail=async function(){
+    const email=(document.querySelector('#sl86Email')?.value||'').trim().toLowerCase();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return toast('Entrez un e-mail valide.');
+    if(email===String(state.user?.email||'').toLowerCase())return toast('C’est déjà votre e-mail actuel.');
+    setBusy('#sl86EmailBtn',true,'Envoi…');
+    try{
+      const token=await validToken();if(!token)throw new Error('Session expirée.');
+      const r=await fetch(SUPABASE_URL+'/auth/v1/user',{
+        method:'PUT',
+        headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+token,'Content-Type':'application/json'},
+        body:JSON.stringify({email})
+      });
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.msg||d.message||'Impossible de modifier l\'e-mail.');
+      toast('Confirmation envoyée. Validez le nouvel e-mail avant le changement.');
+    }catch(e){toast(friendlyError(e))}
+    finally{setBusy('#sl86EmailBtn',false,'Changer l\'e-mail')}
+  };
+
+  window.sl86DeleteAccount=async function(){
+    if(!confirm('Supprimer définitivement votre compte ShopLink Maroc ?'))return;
+    const word=prompt('Écrivez SUPPRIMER pour confirmer :','');
+    if(word!=='SUPPRIMER')return toast('Suppression annulée.');
+    setBusy('#sl86DeleteBtn',true,'Suppression…');
+    try{
+      await api('/rest/v1/rpc/delete_my_account',{method:'POST',auth:true,body:{}});
+      state.session=null;state.user=null;state.shop={...defaults.shop};state.products=[];state.orders=[];
+      try{
+        ['sl_session','sl_user','sl_shop','sl_products','sl_orders','sl41_template','sl54_pending_order'].forEach(k=>localStorage.removeItem(k));
+        sessionStorage.clear();
+      }catch{}
+      toast('Compte supprimé.');
+      setTimeout(()=>go('home'),500);
+    }catch(e){toast(friendlyError(e));setBusy('#sl86DeleteBtn',false,'Supprimer mon compte')}
+  };
+
+  window.sl86EnhanceShop=function(){
+    const m=document.querySelector('#dashMain');
+    if(!m||m.querySelector('#sl86SocialPanel'))return;
+    m.insertAdjacentHTML('beforeend',
+      '<div class="panel sl86-socialPanel" id="sl86SocialPanel"><div class="panelHead"><div><h3>Réseaux & contact</h3><div class="sub">Ajoutez vos liens publics. Le WhatsApp utilise le numéro déjà enregistré dans Ma boutique.</div></div></div>'+
+      '<div class="sl86-grid2">'+
+      '<div class="field"><label>Instagram</label><input id="sl86Instagram" value="'+attr(state.shop?.instagram_url||'')+'" placeholder="@votrecompte ou lien Instagram"><small>Ex: @ma_boutique</small></div>'+
+      '<div class="field"><label>Facebook</label><input id="sl86Facebook" value="'+attr(state.shop?.facebook_url||'')+'" placeholder="Page Facebook ou lien"><small>Ex: facebook.com/maboutique</small></div>'+
+      '<div class="field"><label>TikTok</label><input id="sl86Tiktok" value="'+attr(state.shop?.tiktok_url||'')+'" placeholder="@votrecompte ou lien TikTok"><small>Ex: @ma_boutique</small></div>'+
+      '<div class="field"><label>WhatsApp</label><input value="'+attr(state.shop?.phone||'')+'" disabled><small>Changez ce numéro dans le champ Téléphone / WhatsApp plus haut.</small></div>'+
+      '</div><button id="sl86SocialSave" class="btn primary" onclick="sl86SaveSocials()">Enregistrer les réseaux</button></div>'
+    );
+  };
+
+  window.sl86SaveSocials=async function(){
+    const instagram_url=sl86SocialUrl(document.querySelector('#sl86Instagram')?.value,'instagram');
+    const facebook_url=sl86SocialUrl(document.querySelector('#sl86Facebook')?.value,'facebook');
+    const tiktok_url=sl86SocialUrl(document.querySelector('#sl86Tiktok')?.value,'tiktok');
+    const rawI=(document.querySelector('#sl86Instagram')?.value||'').trim();
+    const rawF=(document.querySelector('#sl86Facebook')?.value||'').trim();
+    const rawT=(document.querySelector('#sl86Tiktok')?.value||'').trim();
+    if(rawI&&!instagram_url)return toast('Lien ou compte Instagram invalide.');
+    if(rawF&&!facebook_url)return toast('Lien ou page Facebook invalide.');
+    if(rawT&&!tiktok_url)return toast('Lien ou compte TikTok invalide.');
+    setBusy('#sl86SocialSave',true,'Enregistrement…');
+    try{
+      if(REMOTE){
+        const rows=await api('/rest/v1/shops?id=eq.'+encodeURIComponent(state.shop.id)+'&select=*',{
+          method:'PATCH',auth:true,headers:{Prefer:'return=representation'},
+          body:{instagram_url,facebook_url,tiktok_url}
+        });
+        state.shop=normalizeShop(rows[0]);
+      }else{
+        state.shop={...state.shop,instagram_url,facebook_url,tiktok_url};
+        DB.set('sl_shop',state.shop);
+      }
+      toast('Réseaux enregistrés ✅');
+      sl86EnhanceShop();
+    }catch(e){toast(friendlyError(e))}
+    finally{setBusy('#sl86SocialSave',false,'Enregistrer les réseaux')}
+  };
+
+  window.sl86RenderPublicExtras=function(){
+    const s=SL86.socials||{};
+    const head=document.querySelector('.shopHeadInner>div:last-child');
+    if(head){
+      head.querySelector('.sl86-socials')?.remove();
+      const links=[];
+      if(s.instagram_url)links.push('<a href="'+attr(s.instagram_url)+'" target="_blank" rel="noopener">Instagram</a>');
+      if(s.facebook_url)links.push('<a href="'+attr(s.facebook_url)+'" target="_blank" rel="noopener">Facebook</a>');
+      if(s.tiktok_url)links.push('<a href="'+attr(s.tiktok_url)+'" target="_blank" rel="noopener">TikTok</a>');
+      const w=typeof wa==='function'?wa(s.whatsapp||''):'';
+      if(w)links.push('<a href="'+attr(w)+'" target="_blank" rel="noopener">WhatsApp</a>');
+      if(links.length)head.insertAdjacentHTML('beforeend','<div class="sl86-socials">'+links.join('')+'</div>');
+    }
+
+    const old=document.querySelector('#sl86ReviewsSection');if(old)old.remove();
+    const data=SL86.publicReviews||{average:0,count:0,reviews:[]};
+    const main=document.querySelector('.storePage main.catalog');
+    if(!main)return;
+    const reviews=Array.isArray(data.reviews)?data.reviews:[];
+    const cards=reviews.length?reviews.map(r=>
+      '<div class="sl86-reviewCard"><div class="sl86-stars">'+sl86Stars(r.rating)+'</div><b>'+esc(r.reviewer_name||'Client vérifié')+'</b><small> • Achat vérifié</small>'+
+      (r.comment?'<p>'+esc(r.comment)+'</p>':'')+
+      '<small>'+formatDate(r.created_at)+'</small></div>'
+    ).join(''):'<div class="empty">Pas encore d\'avis vérifiés.</div>';
+    main.insertAdjacentHTML('afterend',
+      '<section class="sl86-reviews" id="sl86ReviewsSection"><div class="container">'+
+      '<div class="sl86-reviewHead"><div><h2>Avis clients</h2><div class="sub">Uniquement après vérification de la commande.</div></div>'+
+      '<div><span class="sl86-score">'+Number(data.average||0).toFixed(1)+'/5</span> <span class="sl86-stars">'+sl86Stars(data.average||0)+'</span><div class="sub">'+Number(data.count||0)+' avis</div></div></div>'+
+      '<div class="sl86-reviewGrid">'+cards+'</div></div></section>'
+    );
+  };
+
+  const oldPublicStore=window.publicStore||publicStore;
+  window.publicStore=async function(slug){
+    const r=await oldPublicStore(slug);
+    if(!REMOTE||!state.publicShop?.id||state.publicShop.id==='demo')return r;
+    try{
+      const all=await Promise.all([
+        api('/rest/v1/rpc/get_public_shop_socials',{method:'POST',body:{p_shop_id:state.publicShop.id}}),
+        api('/rest/v1/rpc/get_public_shop_reviews',{method:'POST',body:{p_shop_id:state.publicShop.id}})
+      ]);
+      SL86.socials=all[0]||{};
+      SL86.publicReviews=all[1]||{average:0,count:0,reviews:[]};
+      sl86RenderPublicExtras();
+    }catch{}
+    return r;
+  };
+  publicStore=window.publicStore;
+
+  window.sl86OpenReview=function(ref,phone,existing){
+    SL86.reviewContext={ref,phone,rating:Number(existing?.rating||0)};
+    document.querySelector('#sl86ReviewModal')?.remove();
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="modal" id="sl86ReviewModal"><div class="modalBox"><div class="panelHead"><div><h2>Laisser un avis</h2><div class="sub">Commande #'+esc(ref)+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl86ReviewModal\').remove()">×</button></div>'+
+      '<div class="sl86-rateButtons" id="sl86RateButtons">'+[1,2,3,4,5].map(n=>'<button type="button" data-rate="'+n+'" onclick="sl86SetRating('+n+')">★</button>').join('')+'</div>'+
+      '<div class="field"><label>Commentaire (optionnel)</label><textarea id="sl86ReviewComment" rows="4" maxlength="800" placeholder="Votre expérience…">'+esc(existing?.comment||'')+'</textarea></div>'+
+      '<button id="sl86ReviewSend" class="btn primary full" onclick="sl86SubmitReview()">Publier l\'avis</button></div></div>'
+    );
+    sl86SetRating(Number(existing?.rating||0));
+  };
+
+  window.sl86SetRating=function(n){
+    if(!SL86.reviewContext)return;
+    SL86.reviewContext.rating=Number(n)||0;
+    document.querySelectorAll('#sl86RateButtons button').forEach(b=>b.classList.toggle('active',Number(b.dataset.rate)<=SL86.reviewContext.rating));
+  };
+
+  window.sl86SubmitReview=async function(){
+    const x=SL86.reviewContext;if(!x)return;
+    if(x.rating<1||x.rating>5)return toast('Choisissez une note de 1 à 5 étoiles.');
+    const comment=(document.querySelector('#sl86ReviewComment')?.value||'').trim();
+    setBusy('#sl86ReviewSend',true,'Publication…');
+    try{
+      await api('/rest/v1/rpc/submit_verified_order_review',{
+        method:'POST',
+        body:{p_order_number:x.ref,p_phone:x.phone,p_rating:x.rating,p_comment:comment}
+      });
+      document.querySelector('#sl86ReviewModal')?.remove();
+      toast('Avis enregistré ✅');
+      if(typeof sl60TrackSubmit==='function')setTimeout(()=>sl60TrackSubmit(),150);
+    }catch(e){toast(friendlyError(e));setBusy('#sl86ReviewSend',false,'Publier l\'avis')}
+  };
+
+  const oldTrack=window.sl60TrackSubmit;
+  if(oldTrack){
+    window.sl60TrackSubmit=async function(){
+      const r=await oldTrack();
+      const ref=(document.querySelector('#sl60TrackRef')?.value||'').trim();
+      const phone=(document.querySelector('#sl60TrackPhone')?.value||'').trim();
+      const box=document.querySelector('#sl60TrackResult');
+      if(!ref||!phone||!box||!box.textContent.trim())return r;
+      try{
+        const e=await api('/rest/v1/rpc/get_review_eligibility',{method:'POST',body:{p_order_number:ref,p_phone:phone}});
+        box.querySelector('.sl86-reviewCta')?.remove();
+        if(e?.allowed){
+          const existing=e.existing||null;
+          box.insertAdjacentHTML('beforeend','<div class="sl86-reviewCta"><button class="btn soft" id="sl86ReviewTrackBtn">'+(existing?'Modifier mon avis':'Laisser un avis ⭐')+'</button></div>');
+          const b=document.querySelector('#sl86ReviewTrackBtn');
+          if(b)b.onclick=function(){sl86OpenReview(ref,phone,existing)};
+        }
+      }catch{}
+      return r;
+    };
+    sl60TrackSubmit=window.sl60TrackSubmit;
+  }
+
+  window.sl86LoadSellerReviews=async function(){
+    const m=document.querySelector('#dashMain');if(!m||m.querySelector('#sl86SellerReviews')||!REMOTE)return;
+    try{
+      const d=await api('/rest/v1/rpc/get_seller_review_stats',{method:'POST',auth:true,body:{}});
+      const rows=Array.isArray(d.reviews)?d.reviews:[];
+      const cards=rows.length?rows.slice(0,5).map(r=>
+        '<div class="sl86-reviewCard"><div class="sl86-stars">'+sl86Stars(r.rating)+'</div><b>'+esc(r.reviewer_name||'Client vérifié')+'</b>'+
+        (r.comment?'<p>'+esc(r.comment)+'</p>':'')+'<small>'+formatDate(r.created_at)+(r.status==='hidden'?' • Masqué':'')+'</small></div>'
+      ).join(''):'<div class="empty">Pas encore d\'avis.</div>';
+      m.insertAdjacentHTML('beforeend','<div class="panel" id="sl86SellerReviews"><div class="panelHead"><div><h3>Avis clients</h3><div class="sub">Avis liés à des commandes vérifiées</div></div><div><b style="font-size:24px">'+Number(d.average||0).toFixed(1)+'/5</b><div class="sub">'+Number(d.count||0)+' avis publiés</div></div></div><div class="sl86-reviewGrid">'+cards+'</div></div>');
+    }catch{}
+  };
+
+  window.sl86AppendAdminReviews=async function(){
+    const m=document.querySelector('#dashMain');if(!m||m.querySelector('#sl86AdminReviews')||!REMOTE)return;
+    try{
+      const rows=await api('/rest/v1/rpc/get_admin_reviews',{method:'POST',auth:true,body:{}});
+      const list=Array.isArray(rows)?rows:[];
+      const body=list.length?list.map(r=>
+        '<div class="sl86-reviewAdminRow"><div class="sl86-reviewAdminHead"><div><b>'+esc(r.shop_name||'Boutique')+'</b> <span class="sub">#'+esc(r.order_number||'')+'</span><div class="sl86-stars">'+sl86Stars(r.rating)+'</div></div><span class="sl41-adminBadge '+(r.status==='hidden'?'off':'')+'">'+(r.status==='hidden'?'Masqué':'Publié')+'</span></div>'+
+        '<p>'+esc(r.comment||'Sans commentaire')+'</p><div class="sub">'+esc(r.reviewer_name||'Client vérifié')+' • '+formatDate(r.created_at)+'</div>'+
+        '<div style="margin-top:10px"><button class="btn soft sl41-mini" onclick="sl86ModerateReview(\''+r.id+'\',\''+(r.status==='hidden'?'published':'hidden')+'\')">'+(r.status==='hidden'?'Republier':'Masquer')+'</button></div></div>'
+      ).join(''):'<div class="empty">Aucun avis pour le moment.</div>';
+      m.insertAdjacentHTML('beforeend','<div class="panel" id="sl86AdminReviews"><div class="panelHead"><div><h3>Modération des avis</h3><div class="sub">Avis provenant uniquement de commandes vérifiées.</div></div></div><div class="sl86-reviewAdmin">'+body+'</div></div>');
+    }catch{}
+  };
+
+  window.sl86ModerateReview=async function(id,status){
+    try{
+      await api('/rest/v1/rpc/admin_set_review_status',{method:'POST',auth:true,body:{p_review_id:id,p_status:status}});
+      document.querySelector('#sl86AdminReviews')?.remove();
+      await sl86AppendAdminReviews();
+      toast(status==='hidden'?'Avis masqué':'Avis republié');
+    }catch(e){toast(friendlyError(e))}
+  };
+
+  const oldTab=window.dashTab||dashTab;
+  window.dashTab=function(tab,btn){
+    const r=oldTab(tab,btn);
+    Promise.resolve(r).then(function(){
+      if(tab==='account')setTimeout(sl86EnhanceAccount,20);
+      if(tab==='shop')setTimeout(sl86EnhanceShop,20);
+      if(tab==='overview')setTimeout(sl86LoadSellerReviews,80);
+      if(tab==='admin')setTimeout(sl86AppendAdminReviews,120);
+    });
+    return r;
+  };
+  dashTab=window.dashTab;
+
+  // If current screen was already rendered before this final enhancement loaded.
+  setTimeout(function(){
+    if(document.querySelector('[data-tab="account"].active'))sl86EnhanceAccount();
+    if(document.querySelector('[data-tab="shop"].active'))sl86EnhanceShop();
+    if(document.querySelector('[data-tab="overview"].active'))sl86LoadSellerReviews();
+  },180);
+})();
+</script>
+
 </body></html>
