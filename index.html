@@ -2362,4 +2362,101 @@ window.addEventListener('pageshow',function(e){
 })();
 </script>
 
+
+<style id="sl88-admin-manager-style">
+.sl88AdminBadge{display:inline-flex;align-items:center;gap:4px;margin-left:7px;padding:4px 7px;border-radius:999px;background:#e8f7ed;color:#146c35;border:1px solid #bfe3cb;font-size:10px;font-weight:900;vertical-align:middle}
+.sl88OwnerBadge{background:#fff5cc;color:#765600;border-color:#ead67d}
+</style>
+<script id="sl88-admin-manager">
+(function(){
+  const A={owner:null};
+  window.SL88=A;
+
+  const FE=window.friendlyError;
+  window.friendlyError=function(e){
+    const m=String(e?.message||e||'');
+    if(/owner_admin_required/i.test(m))return 'Ghir Admin principal li y9der y3ti ola y7yed صلاحية admin.';
+    if(/cannot_revoke_owner/i.test(m))return 'Admin principal ma ymknch t7yed lih صلاحية admin.';
+    return FE?FE(e):m;
+  };
+  friendlyError=window.friendlyError;
+
+  window.sl88EnhanceUsers=async function(){
+    const panel=document.querySelector('[data-sl60-panel="users"]');
+    const rows=panel?.querySelectorAll('tbody tr');
+    const users=window.SL60?.adminUsers?.users||[];
+    if(!panel||!rows?.length||!users.length)return;
+
+    if(A.owner===null){
+      try{A.owner=await api('/rest/v1/rpc/is_platform_owner',{method:'POST',auth:true,body:{}})===true}
+      catch{A.owner=false}
+    }
+
+    rows.forEach(function(tr,i){
+      const u=users[i];
+      if(!u)return;
+
+      const first=tr.querySelector('td:first-child');
+      if(first&&!first.querySelector('.sl88AdminBadge')&&u.is_admin){
+        const badge=document.createElement('span');
+        badge.className='sl88AdminBadge '+(u.is_owner_admin?'sl88OwnerBadge':'');
+        badge.textContent=u.is_owner_admin?'👑 Admin principal':'🛡️ Admin';
+        first.querySelector('b')?.appendChild(badge);
+      }
+
+      const actions=tr.querySelector('td:last-child .rowBtns')||tr.querySelector('td:last-child');
+      if(!actions||actions.querySelector('.sl88AdminRoleBtn'))return;
+
+      if(A.owner===true&&!u.is_owner_admin){
+        const b=document.createElement('button');
+        b.className='btn '+(u.is_admin?'soft':'primary')+' sl41-mini sl88AdminRoleBtn';
+        b.type='button';
+        b.textContent=u.is_admin?'Retirer admin':'Donner admin';
+        b.onclick=function(){sl88SetAdmin(u.id,!!u.is_admin,u.email||u.full_name||'ce compte')};
+        actions.appendChild(b);
+      }
+    });
+  };
+
+  window.sl88SetAdmin=async function(userId,isAdmin,label){
+    const action=isAdmin?'retirer la permission ADMIN de':'donner la permission ADMIN à';
+    if(!confirm('Confirmer : '+action+' '+label+' ?'))return;
+
+    try{
+      await api('/rest/v1/rpc/admin_set_platform_admin',{
+        method:'POST',
+        auth:true,
+        body:{p_user_id:userId,p_enabled:!isAdmin}
+      });
+      toast(isAdmin?'Permission admin retirée.':'Permission admin accordée ✅');
+      if(typeof sl60RenderAdmin==='function')await sl60RenderAdmin();
+      setTimeout(function(){
+        sl60AdminTab?.('users');
+        sl88EnhanceUsers();
+      },100);
+    }catch(e){toast(friendlyError(e))}
+  };
+
+  const OLD_ADMIN=window.sl60RenderAdmin;
+  if(OLD_ADMIN){
+    window.sl60RenderAdmin=async function(){
+      A.owner=null;
+      const r=await OLD_ADMIN();
+      setTimeout(sl88EnhanceUsers,80);
+      return r;
+    };
+    sl60RenderAdmin=window.sl60RenderAdmin;
+  }
+
+  const OLD_ENH=window.sl87EnhanceUsers;
+  if(OLD_ENH){
+    window.sl87EnhanceUsers=function(){
+      const r=OLD_ENH();
+      Promise.resolve(r).then(function(){setTimeout(sl88EnhanceUsers,20)});
+      return r;
+    };
+  }
+})();
+</script>
+
 </body></html>
