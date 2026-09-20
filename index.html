@@ -1637,7 +1637,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
         api('/rest/v1/rpc/get_admin_risk_dashboard',{method:'POST',auth:true,body:{}})
       ]);
       const d=all[0]||{},pay=all[1]||{},users=all[2]||{},risk=all[3]||{},shops=d.shops||[],reports=d.reports||[],payments=pay.payments||[];
-      S.adminUsers=users;S.adminRisk=risk;
+      S.adminUsers=users;S.adminRisk=risk;S.adminShops=shops;
       const shopRows=shops.map(function(x){return '<tr><td><b>'+esc(x.name||'Boutique')+'</b><br><span class="sub">'+esc(x.city||'—')+' • '+esc(x.category||'Autre')+'</span></td><td>'+esc(x.seller_name||'Vendeur')+'<br><span class="sub">'+esc(x.seller_email||'')+'</span></td><td>'+Number(x.orders_count||0)+' commandes<br><b>'+money(x.sales_total||0)+'</b></td><td><span class="sl41-adminBadge '+(x.is_open?'':'off')+'">'+(x.is_open?'Ouverte':'Fermee')+'</span></td><td><button class="btn soft sl41-mini" onclick="sl60AdminShopOpen(\''+x.id+'\','+(x.is_open?'false':'true')+')">'+(x.is_open?'Fermer':'Ouvrir')+'</button></td></tr>'}).join('');
       const userRows=(users.users||[]).map(function(u){const privateOwner=u.private_owner_fields===true;const emailLine=(!privateOwner&&u.email)?'<br><span class="sub">'+esc(u.email)+'</span>':'';const cityLine=(!privateOwner&&u.city)?'<br><span class="sub">'+esc(u.city)+'</span>':'';const blockBtn=u.is_owner_admin?'':'<button class="btn '+(u.blocked?'primary':'soft')+' sl41-mini" onclick="sl60AdminSetUserBlock(\''+u.id+'\','+(u.blocked?'false':'true')+')">'+(u.blocked?'Debloquer':'Bloquer')+'</button>';const whitelistBtn=u.is_owner_admin?'':'<button class="btn '+(u.unlock_whitelisted?'soft':'primary')+' sl41-mini" onclick="sl63AdminSetWhitelist(\''+u.id+'\','+(u.unlock_whitelisted?'false':'true')+')">'+(u.unlock_whitelisted?'Retirer whitelist':'5 DH gratuit')+'</button>';return '<tr><td><b>'+esc(u.full_name||'Utilisateur')+'</b>'+emailLine+'</td><td>'+esc(u.shop_name||'Sans boutique')+cityLine+'</td><td>'+formatDate(u.created_at)+'</td><td><span class="sl41-adminBadge '+(u.blocked?'off':'')+'">'+(u.blocked?'Bloque':'Actif')+'</span></td><td><span class="sl41-adminBadge '+(u.unlock_whitelisted?'':'off')+'">'+(u.unlock_whitelisted?'Gratuit':'5 DH')+'</span></td><td><div class="rowBtns">'+whitelistBtn+blockBtn+'</div></td></tr>'}).join('');
       const riskRows=(risk.clients||[]).map(function(r){const cl=Number(r.risk_score)>=70?'sl60RiskHigh':'sl60RiskMid';return '<tr><td><b>'+esc(r.masked_phone||'Numero masque')+'</b><br><span class="sub">'+esc(String(r.phone_hash||'').slice(0,12))+'...</span></td><td class="'+cl+'">'+Number(r.risk_score||0)+'</td><td>'+Number(r.unverified_count||0)+' non verifiees<br>'+Number(r.cancelled_count||0)+' annulees</td><td><span class="sl41-adminBadge '+(r.blocked?'off':'')+'">'+(r.blocked?'Bloque':'Surveille')+'</span></td><td><button class="btn '+(r.blocked?'primary':'soft')+' sl41-mini" onclick="sl60AdminSetClientBlock(\''+r.phone_hash+'\','+(r.blocked?'false':'true')+')">'+(r.blocked?'Debloquer':'Bloquer')+'</button></td></tr>'}).join('');
@@ -2880,6 +2880,112 @@ window.addEventListener('pageshow',function(e){
       const r=await OLD_ADMIN();
       await Promise.resolve(r);
       setTimeout(sl91LoadBlacklist,80);
+      return r;
+    };
+    sl60RenderAdmin=window.sl60RenderAdmin;
+  }
+})();
+</script>
+
+
+<style id="sl92-delete-shop-style">
+.sl92DeleteShopBtn{background:#fff7f7!important;border-color:#fecaca!important;color:#991b1b!important}
+.sl92DeleteWarn{padding:12px 14px;border:1px solid #fecaca;background:#fff7f7;color:#7f1d1d;border-radius:12px;line-height:1.5;margin:12px 0}
+</style>
+<script id="sl92-delete-shop">
+(function(){
+  const D={owner:null,target:null};
+  window.SL92=D;
+
+  const FE=window.friendlyError;
+  window.friendlyError=function(e){
+    const m=String(e?.message||e||'');
+    if(/shop_name_confirmation_required/i.test(m))return 'Kteb smiya dyal boutique exactement bach t2kked suppression.';
+    if(/shop_not_found/i.test(m))return 'Boutique ma tl9atch.';
+    return FE?FE(e):m;
+  };
+  friendlyError=window.friendlyError;
+
+  window.sl92OpenDeleteShop=function(shop){
+    D.target=shop;
+    document.querySelector('#sl92DeleteShopModal')?.remove();
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="modal" id="sl92DeleteShopModal"><div class="modalBox">'+
+      '<div class="panelHead"><div><h2>Supprimer boutique</h2><div class="sub">'+esc(shop.name||'Boutique')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl92DeleteShopModal\').remove()">×</button></div>'+
+      '<div class="sl92DeleteWarn"><b>Suppression definitive</b><br>Boutique ghadi t7yed mn site. Produits, commandes, signalements, avis w donnees liees biha ghadi yt7ydo. Compte dyal seller ma ghadi ytmse7ch.</div>'+
+      '<div class="field"><label>Confirmation</label><input id="sl92DeleteShopName" autocomplete="off" placeholder="Kteb : '+attr(shop.name||'')+'"><small style="display:block;margin-top:6px;color:#718078">Kteb smiya dyal boutique exactement.</small></div>'+
+      '<button id="sl92DeleteShopRun" class="btn full sl89DangerBtn" onclick="sl92DeleteShop()">Supprimer definitivement la boutique</button>'+
+      '</div></div>'
+    );
+  };
+
+  window.sl92DeleteShop=async function(){
+    const shop=D.target;if(!shop)return;
+    const confirmName=(document.querySelector('#sl92DeleteShopName')?.value||'').trim();
+    if(confirmName!==String(shop.name||'').trim())return toast('Kteb smiya dyal boutique exactement.');
+    if(!confirm('Derniere confirmation : supprimer definitivement cette boutique ?'))return;
+
+    setBusy('#sl92DeleteShopRun',true,'Suppression…');
+    try{
+      const out=await api('/rest/v1/rpc/admin_delete_shop',{
+        method:'POST',auth:true,
+        body:{p_shop_id:shop.id,p_confirm_name:confirmName}
+      });
+      document.querySelector('#sl92DeleteShopModal')?.remove();
+
+      if(String(state.shop?.id||'')===String(shop.id)){
+        state.shop={...defaults.shop};
+        state.products=[];
+        state.orders=[];
+        try{
+          DB.set('sl_shop',null);
+          DB.set('sl_products',[]);
+          DB.set('sl_orders',[]);
+        }catch{}
+      }
+
+      toast('Boutique supprimee definitivement ✅');
+      if(typeof sl60RenderAdmin==='function')await sl60RenderAdmin();
+      setTimeout(function(){sl60AdminTab?.('shops')},100);
+    }catch(e){
+      toast(friendlyError(e));
+      setBusy('#sl92DeleteShopRun',false,'Supprimer definitivement la boutique');
+    }
+  };
+
+  window.sl92EnhanceShops=async function(){
+    const panel=document.querySelector('[data-sl60-panel="shops"]');
+    const rows=panel?.querySelectorAll('tbody tr');
+    const shops=window.SL60?.adminShops||[];
+    if(!panel||!rows?.length||!shops.length)return;
+
+    if(D.owner===null){
+      try{D.owner=await api('/rest/v1/rpc/is_platform_owner',{method:'POST',auth:true,body:{}})===true}
+      catch{D.owner=false}
+    }
+    if(D.owner!==true)return;
+
+    rows.forEach(function(tr,i){
+      const shop=shops[i];if(!shop)return;
+      const actions=tr.querySelector('td:last-child');
+      if(!actions||actions.querySelector('.sl92DeleteShopBtn'))return;
+      const b=document.createElement('button');
+      b.type='button';
+      b.className='btn soft sl41-mini sl92DeleteShopBtn';
+      b.textContent='Supprimer';
+      b.onclick=function(){sl92OpenDeleteShop(shop)};
+      actions.appendChild(document.createTextNode(' '));
+      actions.appendChild(b);
+    });
+  };
+
+  const OLD_ADMIN=window.sl60RenderAdmin;
+  if(OLD_ADMIN){
+    window.sl60RenderAdmin=async function(){
+      D.owner=null;
+      const r=await OLD_ADMIN();
+      await Promise.resolve(r);
+      setTimeout(sl92EnhanceShops,130);
       return r;
     };
     sl60RenderAdmin=window.sl60RenderAdmin;
