@@ -1699,18 +1699,55 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
 
   window.sl70OpenReport=async function(id){
     try{
-      const data=await api('/rest/v1/rpc/get_admin_report_thread',{method:'POST',auth:true,body:{p_report_id:id}});
+      const results=await Promise.all([
+        api('/rest/v1/rpc/get_admin_report_thread',{method:'POST',auth:true,body:{p_report_id:id}}),
+        api('/rest/v1/rpc/is_platform_owner',{method:'POST',auth:true,body:{}})
+      ]);
+      const data=results[0]||{},isOwner=results[1]===true;
       const r=data.report||{},replies=data.replies||[];
+      const archived=!!r.archived_at;
+      const canArchive=isOwner&&!archived&&(r.status==='resolved'||r.status==='closed');
+
       document.querySelector('#sl70ReportModal')?.remove();
       document.body.insertAdjacentHTML('beforeend',
         '<div class="modal" id="sl70ReportModal"><div class="modalBox">'+
-        '<div class="panelHead"><div><h2>Signalement</h2><div class="sub">'+esc(r.boutique_name||'Boutique')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl70ReportModal\').remove()">×</button></div>'+
+        '<div class="panelHead"><div><h2>Signalement</h2><div class="sub">'+esc(r.boutique_name||'Boutique')+(archived?' • Archivé':'')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl70ReportModal\').remove()">×</button></div>'+
         '<div class="sl70ReportDetails"><b>'+esc(r.reason||'autre')+'</b><br>'+esc(r.details||'Sans détail')+'<br><span class="sub">'+formatDate(r.created_at)+'</span>'+(r.page_url?'<br><a href="'+attr(r.page_url)+'" target="_blank" rel="noopener">Ouvrir la page signalée</a>':'')+'</div>'+
-        '<div class="sl70ReportDetails"><b>Expéditeur</b><br>'+(r.reporter_user_id?(esc(r.reporter_name||'Utilisateur')+(r.reporter_email?'<br><span class="sub">'+esc(r.reporter_email)+'</span>':'')):'<span class="sub">Signalement anonyme — impossible d’envoyer une réponse à cette personne.</span>')+'</div>'+
+        '<div class="sl70ReportDetails"><b>Expéditeur</b><br>'+(r.reporter_user_id?(esc(r.reporter_name||'Utilisateur')+(r.reporter_email?'<br><span class="sub">'+esc(r.reporter_email)+'</span>':'')):'<span class="sub">Signalement anonyme</span>')+'</div>'+
         '<div class="sl70Thread"><b>Réponses de l’administration</b>'+(replies.length?replies.map(function(x){return '<div class="sl70Reply"><b>'+esc(x.admin_name||'Administration')+'</b><div>'+esc(x.message||'')+'</div><span class="sub">'+formatDate(x.created_at)+'</span></div>'}).join(''):'<div class="sub">Aucune réponse pour le moment.</div>')+'</div>'+
-        (r.reporter_user_id?'<div class="sl70ReplyBox"><select id="sl70ReportStatus"><option value="in_review" '+(r.status==='in_review'?'selected':'')+'>En cours</option><option value="resolved" '+(r.status==='resolved'?'selected':'')+'>Résolu</option><option value="closed" '+(r.status==='closed'?'selected':'')+'>Fermé</option><option value="open" '+(r.status==='open'?'selected':'')+'>Nouveau</option></select><textarea id="sl70ReportReply" rows="4" maxlength="2000" placeholder="Écrire une réponse à cette personne..."></textarea><button class="btn primary" onclick="sl70SendReportReply(\''+id+'\')">Envoyer la réponse</button></div>':'')+
+        (archived
+          ?'<div class="sl70ReportDetails"><b>Archivé</b><br><span class="sub">'+formatDate(r.archived_at)+'</span></div>'
+          :'<div class="sl70ReplyBox"><label><b>Statut</b></label><select id="sl70ReportStatus"><option value="open" '+(r.status==='open'?'selected':'')+'>Nouveau</option><option value="in_review" '+(r.status==='in_review'?'selected':'')+'>En cours</option><option value="resolved" '+(r.status==='resolved'?'selected':'')+'>Résolu</option><option value="closed" '+(r.status==='closed'?'selected':'')+'>Fermé</option></select><button class="btn soft" onclick="sl70UpdateReportStatus(\''+id+'\')">Enregistrer statut</button>'+
+            (r.reporter_user_id?'<textarea id="sl70ReportReply" rows="4" maxlength="2000" placeholder="Écrire une réponse à cette personne..."></textarea><button class="btn primary" onclick="sl70SendReportReply(\''+id+'\')">Envoyer la réponse</button>':'')+
+            (canArchive?'<button class="btn soft" style="border-color:#fecaca;color:#991b1b" onclick="sl70ArchiveReport(\''+id+'\')">Supprimer de la liste</button>':'')+
+          '</div>')+
         '</div></div>'
       );
+    }catch(e){toast(friendlyError(e))}
+  };
+
+  window.sl70UpdateReportStatus=async function(id){
+    const status=document.querySelector('#sl70ReportStatus')?.value||'open';
+    try{
+      await api('/rest/v1/rpc/admin_update_report_status',{method:'POST',auth:true,body:{p_report_id:id,p_status:status}});
+      toast('Statut mis à jour ✅');
+      await sl70OpenReport(id);
+      if(typeof sl60RenderAdmin==='function'){
+        setTimeout(async function(){await sl60RenderAdmin();setTimeout(function(){sl60AdminTab?.('reports')},80)},80);
+      }
+    }catch(e){toast(friendlyError(e))}
+  };
+
+  window.sl70ArchiveReport=async function(id){
+    if(!confirm('Supprimer ce signalement de la liste ? Il restera conservé dans l’historique de sécurité.'))return;
+    try{
+      await api('/rest/v1/rpc/admin_archive_report',{method:'POST',auth:true,body:{p_report_id:id}});
+      document.querySelector('#sl70ReportModal')?.remove();
+      toast('Signalement supprimé de la liste ✅');
+      if(typeof sl60RenderAdmin==='function'){
+        await sl60RenderAdmin();
+        setTimeout(function(){sl60AdminTab?.('reports')},100);
+      }
     }catch(e){toast(friendlyError(e))}
   };
 
