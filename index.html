@@ -268,11 +268,21 @@ function forgotPassword(){
 }
 
 
+async function sl90RequestPasswordRecovery(email){
+  const r=await fetch(SUPABASE_URL+'/functions/v1/password-recovery',{
+    method:'POST',
+    headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({email,redirect_to:AUTH_REDIRECT+'?password_recovery=1'})
+  });
+  if(!r.ok)throw new Error('Impossible d’envoyer le lien pour le moment.');
+  return r.json().catch(()=>({ok:true}));
+}
+
 async function sendResetPassword(){
   const email=$('#resetEmail')?.value.trim(); if(!email)return toast('Entrez votre adresse e-mail.');
   setBusy('#resetBtn',true,'Envoi...');
   try{
-    await authRequest('/auth/v1/recover?redirect_to='+encodeURIComponent(AUTH_REDIRECT+'?password_recovery=1'),{email});
+    await sl90RequestPasswordRecovery(email);
     app.innerHTML=`<div class="authPage"><div class="authCard verifyCard">${brand()}<div class="verifyIcon mail">✉</div><span class="verifyBadge">E-MAIL ENVOYÉ</span><h1>Vérifiez votre boîte mail</h1><p>Si un compte existe pour <b>${esc(email)}</b>, un lien de réinitialisation a été envoyé.</p><div class="switch"><a href="#" onclick="go('login');return false">← Retour à la connexion</a></div></div></div>`;
   }catch(e){toast(friendlyError(e));}
   finally{setBusy('#resetBtn',false,'Envoyer le lien');}
@@ -615,6 +625,15 @@ async function consumeAuthCallback(){
     DB.set('sl_user',state.user);
 
     if(type==='recovery'||forceRecovery){
+      try{
+        const banned=await api('/rest/v1/rpc/is_current_user_permanently_banned',{method:'POST',auth:true,body:{}});
+        if(banned===true){
+          state.session=null;state.user=null;DB.set('sl_session',null);DB.set('sl_user',null);
+          history.replaceState(null,'',location.pathname+'#login');
+          toast('Ce compte est banni définitivement.');
+          return true;
+        }
+      }catch{}
       history.replaceState(null,'',location.pathname+'#reset-password');
       resetPassword();
       return true;
@@ -641,7 +660,7 @@ async function consumeAuthCallback(){
 const _fe=friendlyError;friendlyError=e=>{const m=String(e?.message||e||'');if(/insufficient_stock/i.test(m))return'Stock insuffisant.';if(/shop_closed_or_missing/i.test(m))return'Boutique fermée actuellement.';if(/product_missing_or_inactive/i.test(m))return'Un produit n’est plus disponible.';if(/invalid_(phone|customer_name)/i.test(m))return'Vérifiez le nom et le téléphone.';return _fe(e)};
 function em(v=''){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())}function wa(v=''){let d=String(v||'').replace(/\D/g,'');if(d.startsWith('00'))d=d.slice(2);if(d.startsWith('0'))d='212'+d.slice(1);return d?`https://wa.me/${d}`:''}function ckey(){return`sl_cart_${state.publicShop?.slug||'x'}`}function saveCart(){try{sessionStorage.setItem(ckey(),JSON.stringify(state.cart))}catch{}}function loadCart(){try{return(JSON.parse(sessionStorage.getItem(ckey())||'[]')||[]).map(x=>{const p=state.publicProducts.find(y=>String(y.id)===String(x.id));if(!p)return null;let q=Math.max(1,Math.min(100,+x.qty||1));if(p.stock!=null)q=Math.min(q,+p.stock);return q?{...p,qty:q}:null}).filter(Boolean)}catch{return[]}}
 const _a=auth;auth=m=>{if(state.user)return go('dashboard');_a(m);const i=$('#password');if(i){const b=document.createElement('button');b.type='button';b.className='pw';b.textContent='Afficher';b.onclick=()=>{i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'Afficher':'Masquer'};i.parentElement.appendChild(b)}['#email','#password','#name'].forEach(s=>$(s)?.addEventListener('keydown',e=>{if(e.key==='Enter')submitAuth(m)}))};
-const _fp=forgotPassword;forgotPassword=()=>{_fp();$('#resetEmail')?.addEventListener('keydown',e=>{if(e.key==='Enter')sendResetPassword()})};sendResetPassword=async()=>{const email=$('#resetEmail')?.value.trim().toLowerCase();if(!em(email))return toast('Entrez une adresse e-mail valide.');setBusy('#resetBtn',1,'Envoi...');try{await authRequest('/auth/v1/recover?redirect_to='+encodeURIComponent(AUTH_REDIRECT+'?password_recovery=1'),{email});app.innerHTML=`<div class="authPage"><div class="authCard verifyCard">${brand()}<div class="verifyIcon mail">✉</div><span class="verifyBadge">E-MAIL ENVOYÉ</span><h1>Vérifiez votre boîte mail</h1><p>Un lien de réinitialisation a été envoyé si ce compte existe.</p><button class="btn soft full" onclick="go('forgot-password')">Renvoyer un lien</button><div class="switch"><a href="#" onclick="go('login');return false">← Connexion</a></div></div></div>`}catch(e){toast(friendlyError(e))}finally{setBusy('#resetBtn',0,'Envoyer le lien')}};
+const _fp=forgotPassword;forgotPassword=()=>{_fp();$('#resetEmail')?.addEventListener('keydown',e=>{if(e.key==='Enter')sendResetPassword()})};sendResetPassword=async()=>{const email=$('#resetEmail')?.value.trim().toLowerCase();if(!em(email))return toast('Entrez une adresse e-mail valide.');setBusy('#resetBtn',1,'Envoi...');try{await sl90RequestPasswordRecovery(email);app.innerHTML=`<div class="authPage"><div class="authCard verifyCard">${brand()}<div class="verifyIcon mail">✉</div><span class="verifyBadge">E-MAIL ENVOYÉ</span><h1>Vérifiez votre boîte mail</h1><p>Un lien de réinitialisation a été envoyé si ce compte existe.</p><button class="btn soft full" onclick="go('forgot-password')">Renvoyer un lien</button><div class="switch"><a href="#" onclick="go('login');return false">← Connexion</a></div></div></div>`}catch(e){toast(friendlyError(e))}finally{setBusy('#resetBtn',0,'Envoyer le lien')}};
 const _ep=emailPending;emailPending=(e='')=>{if(e)DB.set('sl_pending_email',e);_ep(e||DB.get('sl_pending_email',''));const mail=e||DB.get('sl_pending_email','');if(mail){const btn=document.createElement('button');btn.id='resendC';btn.className='btn soft full';btn.textContent='Renvoyer l’e-mail';btn.onclick=async()=>{setBusy('#resendC',1,'Renvoi...');try{await authRequest('/auth/v1/resend',{type:'signup',email:mail,options:{emailRedirectTo:AUTH_REDIRECT}});toast('E-mail renvoyé ✅')}catch(x){toast(friendlyError(x))}finally{setBusy('#resendC',0,'Renvoyer l’e-mail')}};document.querySelector('.verifyNote')?.after(btn)}};
 const _rs=renderStore;renderStore=()=>{_rs();state.cart=loadCart();renderCart();const s=state.publicShop,h=document.querySelector('.shopHeadInner>div:last-child'),u=wa(s?.phone);if(h&&u)h.insertAdjacentHTML('beforeend',`<a class="wc" href="${u}" target="_blank" rel="noopener">💬 WhatsApp</a>`);const top=document.querySelector('.catalog .topRow');if(!s?.is_open)document.querySelector('.shopHeader')?.insertAdjacentHTML('afterend','<div class="closed">Boutique fermée : consultation possible, commandes désactivées.</div>')};function fc(){const q=($('#csearch')?.value||'').toLowerCase(),c=$('#catalogFilter')?.value||'';document.querySelectorAll('.catalogCard').forEach(x=>x.style.display=(!q||x.textContent.toLowerCase().includes(q))&&(!c||x.dataset.cat===c)?'':'none')}filterCatalog=fc;const _ac=addCartById;addCartById=id=>{_ac(id);saveCart()};const _cq=changeCartQty;changeCartQty=(id,d)=>{_cq(id,d);saveCart()};const _po=placeOrder;placeOrder=async()=>{const old=state.cart.map(x=>({...x}));await _po();if(old.length&&!state.cart.length){try{sessionStorage.removeItem(ckey())}catch{}old.forEach(l=>{const p=state.publicProducts.find(x=>String(x.id)===String(l.id));if(p&&p.stock!=null)p.stock=Math.max(0,+p.stock-l.qty)});if($('#catalogGrid'))$('#catalogGrid').innerHTML=catalogCards(state.publicProducts)}};
 const _ot=ordersTable;ordersTable=limit=>{const html=_ot(limit);setTimeout(()=>document.querySelectorAll('.table tbody tr').forEach((tr,i)=>{const o=(limit?state.orders.slice(0,limit):state.orders)[i];if(!o||tr.querySelector('.eye'))return;const td=document.createElement('td');td.innerHTML=`<button class="iconBtn eye" onclick="orderDetail('${o.id}')">👁️</button>${wa(o.phone)?` <a class="iconBtn" href="${wa(o.phone)}" target="_blank" rel="noopener">💬</a>`:''}`;tr.appendChild(td)}),0);return html};function orderDetail(id){const o=state.orders.find(x=>String(x.id)===String(id));if(!o)return;document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="modal"><div class="modalBox"><div class="panelHead"><h2>Commande</h2><button class="modalX" onclick="$('#modal').remove()">×</button></div><p><b>${esc(o.customer_name)}</b><br>${esc(o.phone)}${o.address?'<br>'+esc(o.address):''}</p><div class="oi">${(o.items||[]).map(x=>`<div><span>${x.qty} × ${esc(x.name||'Article')}</span><b>${money((+x.price||0)*(+x.qty||1))}</b></div>`).join('')}</div><h3>Total : ${money(o.total)}</h3>${o.note?`<p class="note"><b>Note :</b> ${esc(o.note)}</p>`:''}<button class="btn soft full" onclick="$('#modal').remove()">Fermer</button></div></div>`)}
