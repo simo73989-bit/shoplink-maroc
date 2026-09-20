@@ -2469,4 +2469,135 @@ window.addEventListener('pageshow',function(e){
 })();
 </script>
 
+
+<style id="sl89-permaban-style">
+.sl89BanBadge{display:inline-flex;align-items:center;gap:5px;margin-left:7px;padding:4px 7px;border-radius:999px;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;font-size:10px;font-weight:900;vertical-align:middle}
+.sl89DangerBtn{background:#991b1b!important;border-color:#991b1b!important;color:#fff!important}
+.sl89BanBox{padding:12px 14px;border:1px solid #fecaca;background:#fff7f7;border-radius:12px;color:#7f1d1d;margin:12px 0;line-height:1.5}
+</style>
+<script id="sl89-permanent-ban">
+(function(){
+  const B={owner:null,target:null};
+  window.SL89=B;
+
+  const FE=window.friendlyError;
+  window.friendlyError=function(e){
+    const m=String(e?.message||e||'');
+    if(/ban_reason_required/i.test(m))return 'Kteb sabab dyal bannissement.';
+    if(/permanent_ban_requires_owner_action/i.test(m))return 'Had compte banni définitivement. Ghir Admin principal li y9der y7yed lban.';
+    if(/permanent_banned_account/i.test(m))return 'Had compte banni définitivement. 7yed lban louwel ila bghiti tdir recovery.';
+    return FE?FE(e):m;
+  };
+  friendlyError=window.friendlyError;
+
+  window.sl89OpenBan=function(u){
+    B.target=u;
+    document.querySelector('#sl89BanModal')?.remove();
+    const banned=!!u.permanent_ban;
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="modal" id="sl89BanModal"><div class="modalBox">'+
+      '<div class="panelHead"><div><h2>'+(banned?'Lever le ban définitif':'Bannir définitivement')+'</h2><div class="sub">'+esc(u.full_name||u.email||'Utilisateur')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl89BanModal\').remove()">×</button></div>'+
+      (banned
+        ?'<div class="sl89BanBox"><b>Had compte banni définitivement.</b><br>Lever le ban ghadi يسمح lih y3awd ydkhl b nafs Gmail. Boutique ma ghadi t7ellch automatiquement.</div>'
+        :'<div class="sl89BanBox"><b>Ban définitif :</b><br>login kaytsed, sessions kaytseddo, boutique kattsed, w dak Gmail kayb9a m7jوز b had compte bach ma y9derch y3awd يسجل bih.</div>')+
+      '<div class="field"><label>Raison</label><textarea id="sl89BanReason" rows="4" maxlength="1000" placeholder="'+(banned?'Ex: décision annulée après vérification…':'Ex: produit interdit, fraude, abus répété…')+'">'+esc(banned?'':(u.block_reason||''))+'</textarea></div>'+
+      '<div class="field"><label>Confirmation</label><input id="sl89BanWord" autocomplete="off" placeholder="Écrivez '+(banned?'DEBANNIR':'BANNIR')+'"></div>'+
+      '<button id="sl89BanRun" class="btn full '+(banned?'primary':'sl89DangerBtn')+'" onclick="sl89RunBan()">'+(banned?'Lever le ban définitif':'Bannir définitivement')+'</button>'+
+      '</div></div>'
+    );
+  };
+
+  window.sl89RunBan=async function(){
+    const u=B.target;if(!u)return;
+    const banned=!!u.permanent_ban;
+    const reason=(document.querySelector('#sl89BanReason')?.value||'').trim();
+    const word=(document.querySelector('#sl89BanWord')?.value||'').trim().toUpperCase();
+    if(!banned&&reason.length<5)return toast('Kteb sabab dyal bannissement.');
+    if(word!==(banned?'DEBANNIR':'BANNIR'))return toast('Kteb '+(banned?'DEBANNIR':'BANNIR')+' bach t2kked.');
+
+    setBusy('#sl89BanRun',true,banned?'Déblocage…':'Bannissement…');
+    try{
+      await api('/rest/v1/rpc/admin_set_permanent_ban',{
+        method:'POST',
+        auth:true,
+        body:{p_user_id:u.id,p_banned:!banned,p_reason:reason}
+      });
+      document.querySelector('#sl89BanModal')?.remove();
+      toast(banned?'Ban définitif levé.':'Compte banni définitivement ✅');
+      if(typeof sl60RenderAdmin==='function')await sl60RenderAdmin();
+      setTimeout(function(){sl60AdminTab?.('users')},100);
+    }catch(e){
+      toast(friendlyError(e));
+      setBusy('#sl89BanRun',false,banned?'Lever le ban définitif':'Bannir définitivement');
+    }
+  };
+
+  window.sl89EnhanceUsers=async function(){
+    const panel=document.querySelector('[data-sl60-panel="users"]');
+    const rows=panel?.querySelectorAll('tbody tr');
+    const users=window.SL60?.adminUsers?.users||[];
+    if(!panel||!rows?.length||!users.length)return;
+
+    if(B.owner===null){
+      try{B.owner=await api('/rest/v1/rpc/is_platform_owner',{method:'POST',auth:true,body:{}})===true}
+      catch{B.owner=false}
+    }
+
+    rows.forEach(function(tr,i){
+      const u=users[i];if(!u)return;
+      const first=tr.querySelector('td:first-child');
+      if(u.permanent_ban&&first&&!first.querySelector('.sl89BanBadge')){
+        const badge=document.createElement('span');
+        badge.className='sl89BanBadge';
+        badge.textContent='⛔ Banni définitif';
+        first.querySelector('b')?.appendChild(badge);
+      }
+
+      const actions=tr.querySelector('td:last-child .rowBtns')||tr.querySelector('td:last-child');
+      if(!actions)return;
+
+      if(u.permanent_ban){
+        actions.querySelectorAll('button').forEach(function(btn){
+          const oc=String(btn.getAttribute('onclick')||'');
+          const tx=String(btn.textContent||'').trim();
+          if(/sl60AdminSetUserBlock|sl87OpenRecovery|sl88SetAdmin/i.test(oc)||/Bloquer|Debloquer|Débloquer|Récupérer|Donner admin|Retirer admin/i.test(tx)){
+            btn.remove();
+          }
+        });
+      }
+
+      if(B.owner===true&&!u.is_owner_admin&&!actions.querySelector('.sl89PermBanBtn')){
+        const b=document.createElement('button');
+        b.type='button';
+        b.className='btn sl41-mini sl89PermBanBtn '+(u.permanent_ban?'soft':'sl89DangerBtn');
+        b.textContent=u.permanent_ban?'Lever ban définitif':'Bannir définitivement';
+        b.onclick=function(){sl89OpenBan(u)};
+        actions.appendChild(b);
+      }
+    });
+  };
+
+  const OLD_ADMIN=window.sl60RenderAdmin;
+  if(OLD_ADMIN){
+    window.sl60RenderAdmin=async function(){
+      B.owner=null;
+      const r=await OLD_ADMIN();
+      setTimeout(sl89EnhanceUsers,120);
+      return r;
+    };
+    sl60RenderAdmin=window.sl60RenderAdmin;
+  }
+
+  const OLD_88=window.sl88EnhanceUsers;
+  if(OLD_88){
+    window.sl88EnhanceUsers=async function(){
+      const r=await OLD_88();
+      await Promise.resolve(r);
+      setTimeout(sl89EnhanceUsers,30);
+      return r;
+    };
+  }
+})();
+</script>
+
 </body></html>
