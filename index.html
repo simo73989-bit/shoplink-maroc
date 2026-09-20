@@ -2376,7 +2376,7 @@ window.addEventListener('pageshow',function(e){
   window.friendlyError=function(e){
     const m=String(e?.message||e||'');
     if(/owner_admin_required/i.test(m))return 'Ghir Admin principal li y9der y3ti ola y7yed صلاحية admin.';
-    if(/cannot_revoke_owner/i.test(m))return 'Admin principal ma ymknch t7yed lih صلاحية admin.';
+    if(/cannot_revoke_owner/i.test(m))return 'Admin principal ma ymknch t7yed lih صلاحية admin.';if(/owner_account_protected/i.test(m))return 'Admin principal protégé : ma ymknch tblockih.';
     return FE?FE(e):m;
   };
   friendlyError=window.friendlyError;
@@ -2406,6 +2406,16 @@ window.addEventListener('pageshow',function(e){
 
       const actions=tr.querySelector('td:last-child .rowBtns')||tr.querySelector('td:last-child');
       if(!actions||actions.querySelector('.sl88AdminRoleBtn'))return;
+
+      if(u.is_owner_admin){
+        actions.querySelectorAll('button').forEach(function(btn){
+          const oc=String(btn.getAttribute('onclick')||'');
+          const tx=String(btn.textContent||'').trim();
+          if(/sl60AdminSetUserBlock|sl87OpenRecovery/i.test(oc)||/^(Bloquer|Debloquer|Débloquer|Récupérer)$/i.test(tx)){
+            btn.remove();
+          }
+        });
+      }
 
       if(A.owner===true&&!u.is_owner_admin){
         const b=document.createElement('button');
