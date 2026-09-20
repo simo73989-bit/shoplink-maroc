@@ -2547,6 +2547,43 @@ window.addEventListener('pageshow',function(e){
     }
   };
 
+  window.sl89OpenDirectBan=function(u){
+    B.target=u;
+    document.querySelector('#sl89BanModal')?.remove();
+    const pending=!!u.under_review;
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="modal" id="sl89BanModal"><div class="modalBox">'+
+      '<div class="panelHead"><div><h2>Bannir definitivement</h2><div class="sub">'+esc(u.full_name||u.email||'Utilisateur')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl89BanModal\').remove()">×</button></div>'+
+      '<div class="sl89BanBox"><b>Ban definitif direct</b><br>'+(pending?'Had compte deja ta7t verification. Ban direct ghadi ysedd dossier b violation confirmee.':'Login kaytsed, sessions kaytseddo, boutique kattsed, w Gmail kayb9a m7jouz b had compte.')+'</div>'+
+      '<div class="field"><label>Raison</label><textarea id="sl89BanReason" rows="4" maxlength="1000" placeholder="Ex: produit interdit, fraude, abus repete…">'+esc(u.review_reason||u.block_reason||'')+'</textarea></div>'+
+      '<div class="field"><label>Confirmation</label><input id="sl89BanWord" autocomplete="off" placeholder="Ecrivez BANNIR"></div>'+
+      '<button id="sl89BanRun" class="btn full sl89DangerBtn" onclick="sl89RunDirectBan()">Bannir definitivement</button>'+
+      '</div></div>'
+    );
+  };
+
+  window.sl89RunDirectBan=async function(){
+    const u=B.target;if(!u)return;
+    const reason=(document.querySelector('#sl89BanReason')?.value||'').trim();
+    const word=(document.querySelector('#sl89BanWord')?.value||'').trim().toUpperCase();
+    if(reason.length<5)return toast('Kteb sabab dyal bannissement.');
+    if(word!=='BANNIR')return toast('Kteb BANNIR bach t2kked.');
+    setBusy('#sl89BanRun',true,'Bannissement…');
+    try{
+      await api('/rest/v1/rpc/admin_set_permanent_ban',{
+        method:'POST',auth:true,
+        body:{p_user_id:u.id,p_banned:true,p_reason:reason}
+      });
+      document.querySelector('#sl89BanModal')?.remove();
+      toast('Compte banni definitivement ✅');
+      if(typeof sl60RenderAdmin==='function')await sl60RenderAdmin();
+      setTimeout(function(){sl60AdminTab?.('blacklist')},120);
+    }catch(e){
+      toast(friendlyError(e));
+      setBusy('#sl89BanRun',false,'Bannir definitivement');
+    }
+  };
+
   window.sl89EnhanceUsers=async function(){
     const panel=document.querySelector('[data-sl60-panel="users"]');
     const rows=panel?.querySelectorAll('tbody tr');
@@ -2583,26 +2620,37 @@ window.addEventListener('pageshow',function(e){
         actions.querySelectorAll('button').forEach(function(btn){
           const oc=String(btn.getAttribute('onclick')||'');
           const tx=String(btn.textContent||'').trim();
-          if(/sl60AdminSetUserBlock|sl87OpenRecovery|sl88SetAdmin/i.test(oc)||/Bloquer|Debloquer|Débloquer|Récupérer|Donner admin|Retirer admin/i.test(tx)){
+          if(/sl60AdminSetUserBlock|sl87OpenRecovery|sl88SetAdmin/i.test(oc)||/Bloquer|Debloquer|Debloquer|Recuperer|Récupérer|Donner admin|Retirer admin/i.test(tx)){
             btn.remove();
           }
         });
       }
 
-      actions.querySelector('.sl89PermBanBtn')?.remove();
+      actions.querySelectorAll('.sl89PermBanBtn,.sl89ReviewBtn,.sl89DirectBanBtn').forEach(x=>x.remove());
 
       if(B.owner===true&&!u.is_owner_admin){
-        const b=document.createElement('button');
-        b.type='button';
-        b.className='btn sl41-mini sl89PermBanBtn '+((u.permanent_ban||u.under_review)?'soft':'primary');
-        if(u.permanent_ban||u.under_review){
-          b.textContent='Ouvrir Blacklist';
-          b.onclick=function(){sl60AdminTab('blacklist')};
+        if(u.permanent_ban){
+          const open=document.createElement('button');
+          open.type='button';
+          open.className='btn soft sl41-mini sl89PermBanBtn';
+          open.textContent='Ouvrir Blacklist';
+          open.onclick=function(){sl60AdminTab('blacklist')};
+          actions.appendChild(open);
         }else{
-          b.textContent='Mettre sous verification';
-          b.onclick=function(){sl89OpenReview(u)};
+          const review=document.createElement('button');
+          review.type='button';
+          review.className='btn primary sl41-mini sl89ReviewBtn';
+          review.textContent=u.under_review?'Ouvrir Blacklist':'Mettre sous verification';
+          review.onclick=u.under_review?function(){sl60AdminTab('blacklist')}:function(){sl89OpenReview(u)};
+          actions.appendChild(review);
+
+          const direct=document.createElement('button');
+          direct.type='button';
+          direct.className='btn sl41-mini sl89DangerBtn sl89DirectBanBtn';
+          direct.textContent='Bannir definitivement';
+          direct.onclick=function(){sl89OpenDirectBan(u)};
+          actions.appendChild(direct);
         }
-        actions.appendChild(b);
       }
     });
   };
