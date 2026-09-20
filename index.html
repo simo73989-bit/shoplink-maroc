@@ -2621,6 +2621,22 @@ window.addEventListener('pageshow',function(e){
     }
   };
 
+  window.sl89UnbanDirect=async function(u){
+    if(B.owner!==true)return toast('Ghir Admin principal li y9der y7yed ban definitif.');
+    const word=prompt('Bach t7yed lban definitif mn '+(u.full_name||u.email||'had compte')+', kteb DEBANNIR :','');
+    if(String(word||'').trim().toUpperCase()!=='DEBANNIR')return;
+    const reason=prompt('Note optionnelle :','Decision annulee par Admin principal')||'';
+    try{
+      await api('/rest/v1/rpc/admin_set_permanent_ban',{
+        method:'POST',auth:true,
+        body:{p_user_id:u.id,p_banned:false,p_reason:reason}
+      });
+      toast('Ban definitif leve ✅');
+      if(typeof sl60RenderAdmin==='function')await sl60RenderAdmin();
+      setTimeout(function(){sl60AdminTab?.('users')},120);
+    }catch(e){toast(friendlyError(e))}
+  };
+
   window.sl89EnhanceUsers=async function(){
     const panel=document.querySelector('[data-sl60-panel="users"]');
     const rows=panel?.querySelectorAll('tbody tr');
@@ -2663,7 +2679,7 @@ window.addEventListener('pageshow',function(e){
         });
       }
 
-      actions.querySelectorAll('.sl89PermBanBtn,.sl89ReviewBtn,.sl89DirectBanBtn').forEach(x=>x.remove());
+      actions.querySelectorAll('.sl89PermBanBtn,.sl89ReviewBtn,.sl89DirectBanBtn,.sl89UnbanBtn').forEach(x=>x.remove());
 
       if(B.owner===true&&!u.is_owner_admin){
         if(u.permanent_ban){
@@ -2673,6 +2689,13 @@ window.addEventListener('pageshow',function(e){
           open.textContent='Ouvrir Blacklist';
           open.onclick=function(){sl60AdminTab('blacklist')};
           actions.appendChild(open);
+
+          const unban=document.createElement('button');
+          unban.type='button';
+          unban.className='btn primary sl41-mini sl89UnbanBtn';
+          unban.textContent='Lever le ban';
+          unban.onclick=function(){sl89UnbanDirect(u)};
+          actions.appendChild(unban);
         }else{
           const review=document.createElement('button');
           review.type='button';
