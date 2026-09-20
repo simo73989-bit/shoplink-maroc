@@ -1884,7 +1884,7 @@ window.addEventListener('pageshow',function(e){
     if(/review_cancelled_order/i.test(m))return 'Une commande annulée ne peut pas recevoir un avis.';
     if(/review_order_not_found/i.test(m))return 'Commande introuvable pour ce numéro.';
     if(/invalid_rating/i.test(m))return 'Choisissez une note de 1 à 5 étoiles.';
-    if(/review_not_found/i.test(m))return 'Avis introuvable.';
+    if(/review_not_found/i.test(m))return 'Avis introuvable.';if(/admin_account_protected/i.test(m))return 'Compte administrateur protégé : il ne peut pas être supprimé.';
     return oldFriendly?oldFriendly(e):m;
   };
   friendlyError=window.friendlyError;
@@ -1920,15 +1920,23 @@ window.addEventListener('pageshow',function(e){
     }catch{return ''}
   }
 
-  window.sl86EnhanceAccount=function(){
+  window.sl86EnhanceAccount=async function(){
     const m=document.querySelector('#dashMain');
     if(!m||m.querySelector('#sl86AccountExtras'))return;
     const host=m.querySelector('.slxAccount')||m.querySelector('.panel');
     if(!host)return;
+
+    let isAdmin=false;
+    if(REMOTE&&state.user){
+      try{isAdmin=await api('/rest/v1/rpc/is_platform_admin',{method:'POST',auth:true,body:{}})===true}catch{}
+    }
+
     host.insertAdjacentHTML('afterend',
       '<div id="sl86AccountExtras">'+
       '<div class="panel"><h3>Changer l\'e-mail</h3><p class="sub">Un lien de confirmation sera envoyé avant que la nouvelle adresse soit utilisée.</p><div class="field"><label>Nouvel e-mail</label><input id="sl86Email" type="email" value="'+attr(state.user?.email||'')+'" placeholder="vous@email.com"></div><button id="sl86EmailBtn" class="btn soft" onclick="sl86ChangeEmail()">Changer l\'e-mail</button></div>'+
-      '<div class="panel sl86-danger"><h3>Supprimer mon compte</h3><p class="sub">Cette action supprime votre boutique, vos produits et les données vendeur liées au compte. Elle est irréversible.</p><button id="sl86DeleteBtn" class="btn soft" onclick="sl86DeleteAccount()">Supprimer mon compte</button></div>'+
+      (isAdmin
+        ?'<div class="panel"><h3>🛡️ Compte administrateur protégé</h3><p class="sub">Had compte howa compte admin dyal ShopLink Maroc. Suppression automatique msdoda bach ma ytms7ch l’accès administrateur.</p><button class="btn soft" disabled>Suppression désactivée</button></div>'
+        :'<div class="panel sl86-danger"><h3>Supprimer mon compte</h3><p class="sub">Cette action supprime votre boutique, vos produits et les données vendeur liées au compte. Elle est irréversible.</p><button id="sl86DeleteBtn" class="btn soft" onclick="sl86DeleteAccount()">Supprimer mon compte</button></div>')+
       '</div>'
     );
   };
