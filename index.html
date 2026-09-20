@@ -1554,7 +1554,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       const x=await api('/rest/v1/rpc/get_account_status',{method:'POST',auth:true,body:{}});
       if(x&&x.blocked){
         const m=document.querySelector('#dashMain');
-        if(m)m.innerHTML='<div class="sl60Blocked"><h2>Compte bloque</h2><p>'+esc(x.reason||'Contactez l administration ShopLink Maroc.')+'</p></div>';
+        if(m)m.innerHTML='<div class="sl60Blocked"><h2>'+(x.under_review?'Compte sous verification':'Compte bloque')+'</h2><p>'+esc(x.reason||'Contactez l administration ShopLink Maroc.')+'</p></div>';
       }
     }catch(e){}
   }
@@ -2502,52 +2502,48 @@ window.addEventListener('pageshow',function(e){
   const FE=window.friendlyError;
   window.friendlyError=function(e){
     const m=String(e?.message||e||'');
+    if(/already_under_review/i.test(m))return 'Had compte deja ta7t verification.';
+    if(/already_permanently_banned/i.test(m))return 'Had compte deja banni definitivement.';
+    if(/blacklist_review_requires_owner_decision/i.test(m))return 'Had compte ta7t verification. Khas decision mn Admin principal.';
+    if(/blacklist_case_already_decided/i.test(m))return 'Had dossier deja ttsala fih decision.';
+    if(/blacklist_case_not_found/i.test(m))return 'Dossier Blacklist ma tl9ach.';
     if(/ban_reason_required/i.test(m))return 'Kteb sabab dyal bannissement.';
-    if(/permanent_ban_requires_owner_action/i.test(m))return 'Had compte banni définitivement. Ghir Admin principal li y9der y7yed lban.';
-    if(/permanent_banned_account/i.test(m))return 'Had compte banni définitivement. 7yed lban louwel ila bghiti tdir recovery.';
+    if(/permanent_ban_requires_owner_action/i.test(m))return 'Had compte banni definitivement. Ghir Admin principal li y9der y7yed lban.';
+    if(/permanent_banned_account/i.test(m))return 'Had compte banni definitivement. 7yed lban louwel ila bghiti tdir recovery.';
     return FE?FE(e):m;
   };
   friendlyError=window.friendlyError;
 
-  window.sl89OpenBan=function(u){
+  window.sl89OpenReview=function(u){
     B.target=u;
     document.querySelector('#sl89BanModal')?.remove();
-    const banned=!!u.permanent_ban;
     document.body.insertAdjacentHTML('beforeend',
       '<div class="modal" id="sl89BanModal"><div class="modalBox">'+
-      '<div class="panelHead"><div><h2>'+(banned?'Lever le ban définitif':'Bannir définitivement')+'</h2><div class="sub">'+esc(u.full_name||u.email||'Utilisateur')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl89BanModal\').remove()">×</button></div>'+
-      (banned
-        ?'<div class="sl89BanBox"><b>Had compte banni définitivement.</b><br>Lever le ban ghadi يسمح lih y3awd ydkhl b nafs Gmail. Boutique ma ghadi t7ellch automatiquement.</div>'
-        :'<div class="sl89BanBox"><b>Ban définitif :</b><br>login kaytsed, sessions kaytseddo, boutique kattsed, w dak Gmail kayb9a m7jوز b had compte bach ma y9derch y3awd يسجل bih.</div>')+
-      '<div class="field"><label>Raison</label><textarea id="sl89BanReason" rows="4" maxlength="1000" placeholder="'+(banned?'Ex: décision annulée après vérification…':'Ex: produit interdit, fraude, abus répété…')+'">'+esc(banned?'':(u.block_reason||''))+'</textarea></div>'+
-      '<div class="field"><label>Confirmation</label><input id="sl89BanWord" autocomplete="off" placeholder="Écrivez '+(banned?'DEBANNIR':'BANNIR')+'"></div>'+
-      '<button id="sl89BanRun" class="btn full '+(banned?'primary':'sl89DangerBtn')+'" onclick="sl89RunBan()">'+(banned?'Lever le ban définitif':'Bannir définitivement')+'</button>'+
+      '<div class="panelHead"><div><h2>Mettre sous verification</h2><div class="sub">'+esc(u.full_name||u.email||'Utilisateur')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl89BanModal\').remove()">×</button></div>'+
+      '<div class="sl89BanBox" style="background:#fff8e5;border-color:#f2cc77;color:#6d4c00"><b>Blacklist — ta7t verification</b><br>Compte ghadi ytwa9ef temporairement, boutique ghadi ttsed, w nta ghadi tراجع dossier qbel ay ban definitif.</div>'+
+      '<div class="field"><label>Raison / note (optionnel)</label><textarea id="sl89BanReason" rows="4" maxlength="1000" placeholder="Ex: signalement produit interdit, comportement suspect…"></textarea></div>'+
+      '<button id="sl89BanRun" class="btn primary full" onclick="sl89StartReview()">Mettre sous verification</button>'+
       '</div></div>'
     );
   };
 
-  window.sl89RunBan=async function(){
+  window.sl89StartReview=async function(){
     const u=B.target;if(!u)return;
-    const banned=!!u.permanent_ban;
     const reason=(document.querySelector('#sl89BanReason')?.value||'').trim();
-    const word=(document.querySelector('#sl89BanWord')?.value||'').trim().toUpperCase();
-    if(!banned&&reason.length<5)return toast('Kteb sabab dyal bannissement.');
-    if(word!==(banned?'DEBANNIR':'BANNIR'))return toast('Kteb '+(banned?'DEBANNIR':'BANNIR')+' bach t2kked.');
-
-    setBusy('#sl89BanRun',true,banned?'Déblocage…':'Bannissement…');
+    if(!confirm('Mettre ce compte sous verification Blacklist ?'))return;
+    setBusy('#sl89BanRun',true,'Mise en verification…');
     try{
-      await api('/rest/v1/rpc/admin_set_permanent_ban',{
-        method:'POST',
-        auth:true,
-        body:{p_user_id:u.id,p_banned:!banned,p_reason:reason}
+      await api('/rest/v1/rpc/admin_start_blacklist_review',{
+        method:'POST',auth:true,
+        body:{p_user_id:u.id,p_reason:reason}
       });
       document.querySelector('#sl89BanModal')?.remove();
-      toast(banned?'Ban définitif levé.':'Compte banni définitivement ✅');
+      toast('Compte mis sous verification ✅');
       if(typeof sl60RenderAdmin==='function')await sl60RenderAdmin();
-      setTimeout(function(){sl60AdminTab?.('users')},100);
+      setTimeout(function(){sl60AdminTab?.('blacklist')},120);
     }catch(e){
       toast(friendlyError(e));
-      setBusy('#sl89BanRun',false,banned?'Lever le ban définitif':'Bannir définitivement');
+      setBusy('#sl89BanRun',false,'Mettre sous verification');
     }
   };
 
@@ -2568,14 +2564,22 @@ window.addEventListener('pageshow',function(e){
       if(u.permanent_ban&&first&&!first.querySelector('.sl89BanBadge')){
         const badge=document.createElement('span');
         badge.className='sl89BanBadge';
-        badge.textContent='⛔ Banni définitif';
+        badge.textContent='⛔ Banni definitif';
+        first.querySelector('b')?.appendChild(badge);
+      }else if(u.under_review&&first&&!first.querySelector('.sl89BanBadge')){
+        const badge=document.createElement('span');
+        badge.className='sl89BanBadge';
+        badge.style.background='#fff4d6';
+        badge.style.color='#8a5a00';
+        badge.style.borderColor='#f2cc77';
+        badge.textContent='🟠 Sous verification';
         first.querySelector('b')?.appendChild(badge);
       }
 
       const actions=tr.querySelector('td:last-child .rowBtns')||tr.querySelector('td:last-child');
       if(!actions)return;
 
-      if(u.permanent_ban){
+      if(u.permanent_ban||u.under_review){
         actions.querySelectorAll('button').forEach(function(btn){
           const oc=String(btn.getAttribute('onclick')||'');
           const tx=String(btn.textContent||'').trim();
@@ -2585,12 +2589,19 @@ window.addEventListener('pageshow',function(e){
         });
       }
 
-      if(B.owner===true&&!u.is_owner_admin&&!actions.querySelector('.sl89PermBanBtn')){
+      actions.querySelector('.sl89PermBanBtn')?.remove();
+
+      if(B.owner===true&&!u.is_owner_admin){
         const b=document.createElement('button');
         b.type='button';
-        b.className='btn sl41-mini sl89PermBanBtn '+(u.permanent_ban?'soft':'sl89DangerBtn');
-        b.textContent=u.permanent_ban?'Lever ban définitif':'Bannir définitivement';
-        b.onclick=function(){sl89OpenBan(u)};
+        b.className='btn sl41-mini sl89PermBanBtn '+((u.permanent_ban||u.under_review)?'soft':'primary');
+        if(u.permanent_ban||u.under_review){
+          b.textContent='Ouvrir Blacklist';
+          b.onclick=function(){sl60AdminTab('blacklist')};
+        }else{
+          b.textContent='Mettre sous verification';
+          b.onclick=function(){sl89OpenReview(u)};
+        }
         actions.appendChild(b);
       }
     });
@@ -2654,6 +2665,7 @@ window.addEventListener('pageshow',function(e){
 
     const reports=Array.isArray(item.recent_reports)?item.recent_reports:[];
     const history=Array.isArray(item.history)?item.history:[];
+    const reviewHistory=Array.isArray(item.review_history)?item.review_history:[];
 
     const reportHtml=reports.length?reports.map(function(r){
       return '<div class="sl91EvidenceRow">'+
@@ -2662,33 +2674,60 @@ window.addEventListener('pageshow',function(e){
         (r.details?'<div style="margin-top:5px">'+esc(r.details)+'</div>':'')+
         (r.id?'<button class="btn soft sl41-mini" style="margin-top:8px" onclick="document.querySelector(\'#sl91DetailsModal\').remove();sl70OpenReport(\''+r.id+'\')">Ouvrir le signalement</button>':'')+
       '</div>';
-    }).join(''):'<div class="sl91Empty">Aucun signalement lié à cette boutique.</div>';
+    }).join(''):'<div class="sl91Empty">Aucun signalement lie a cette boutique.</div>';
 
-    const historyHtml=history.length?history.map(function(h){
-      return '<div><b>'+(h.action==='ban'?'⛔ Ban définitif':'✅ Ban levé')+'</b><div>'+esc(h.reason||'Sans raison')+'</div><div class="sub">'+formatDate(h.created_at)+' • '+esc(h.actor||'Administration')+'</div></div>';
-    }).join(''):'<div class="sl91Empty">Aucun historique.</div>';
+    const reviewHtml=reviewHistory.length?reviewHistory.map(function(h){
+      const lab=h.status==='under_review'?'🟠 Sous verification':h.status==='confirmed'?'⛔ Violation confirmee':'✅ Aucune violation';
+      return '<div><b>'+lab+'</b><div>'+esc(h.reason||'Sans note')+'</div>'+
+        (h.decision_note?'<div>'+esc(h.decision_note)+'</div>':'')+
+        '<div class="sub">'+formatDate(h.opened_at)+(h.decided_at?' → '+formatDate(h.decided_at):'')+' • '+esc(h.opened_by_name||'Administration')+'</div></div>';
+    }).join(''):'<div class="sl91Empty">Aucun historique de verification.</div>';
+
+    const banHtml=history.length?history.map(function(h){
+      return '<div><b>'+(h.action==='ban'?'⛔ Ban definitif':'✅ Ban leve')+'</b><div>'+esc(h.reason||'Sans raison')+'</div><div class="sub">'+formatDate(h.created_at)+' • '+esc(h.actor||'Administration')+'</div></div>';
+    }).join(''):'<div class="sl91Empty">Aucun historique de ban definitif.</div>';
 
     document.body.insertAdjacentHTML('beforeend',
       '<div class="modal" id="sl91DetailsModal"><div class="modalBox">'+
       '<div class="panelHead"><div><h2>Dossier Blacklist</h2><div class="sub">'+esc(item.full_name||'Utilisateur')+' • '+esc(item.email||'')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl91DetailsModal\').remove()">×</button></div>'+
-      '<div class="sl91Reason"><b>Raison du ban :</b><br>'+esc(item.reason||'Non précisée')+'</div>'+
+      '<div class="sl91Reason"><b>'+(item.blacklist_status==='under_review'?'Raison de la verification :':'Raison du ban :')+'</b><br>'+esc(item.reason||'Non precisee')+'</div>'+
       '<h3 style="margin-top:18px">Signalements / preuves</h3><div class="sl91Evidence">'+reportHtml+'</div>'+
-      '<h3 style="margin-top:18px">Historique ban</h3><div class="sl91Audit">'+historyHtml+'</div>'+
+      '<h3 style="margin-top:18px">Historique verification</h3><div class="sl91Audit">'+reviewHtml+'</div>'+
+      '<h3 style="margin-top:18px">Historique ban</h3><div class="sl91Audit">'+banHtml+'</div>'+
       '</div></div>'
     );
   };
 
+  window.sl91Decide=async function(caseId,decision,label){
+    if(X.owner!==true)return toast('Ghir Admin principal li y9der yakhod decision Blacklist.');
+    const confirmed=decision==='confirmed';
+    const msg=confirmed
+      ?('T2kkedti belli '+label+' dar mokhalafa? Hadchi ghadi ydir Ban definitif.')
+      :('T2kkedti belli ma kayna ta mokhalafa? '+label+' ghadi يرجع normal kifma kan.');
+    if(!confirm(msg))return;
+    const note=prompt('Note decision (optionnelle) :',confirmed?'Violation confirmee apres verification':'Aucune violation confirmee')||'';
+    try{
+      await api('/rest/v1/rpc/admin_decide_blacklist_review',{
+        method:'POST',auth:true,
+        body:{p_case_id:caseId,p_decision:decision,p_note:note}
+      });
+      toast(confirmed?'Ban definitif applique ✅':'Compte restaure kifma kan ✅');
+      await sl60RenderAdmin();
+      setTimeout(function(){sl60AdminTab('blacklist')},120);
+    }catch(e){toast(friendlyError(e))}
+  };
+
   window.sl91Unban=async function(userId,label){
-    if(X.owner!==true)return toast('Ghir Admin principal li y9der y7yed ban définitif.');
-    const word=prompt('Bach t7yed lban définitif mn '+label+', kteb DEBANNIR :','');
+    if(X.owner!==true)return toast('Ghir Admin principal li y9der y7yed ban definitif.');
+    const word=prompt('Bach t7yed lban definitif mn '+label+', kteb DEBANNIR :','');
     if(String(word||'').trim().toUpperCase()!=='DEBANNIR')return;
-    const reason=prompt('Note optionnelle :','Décision annulée par Admin principal')||'';
+    const reason=prompt('Note optionnelle :','Decision annulee par Admin principal')||'';
     try{
       await api('/rest/v1/rpc/admin_set_permanent_ban',{
         method:'POST',auth:true,
         body:{p_user_id:userId,p_banned:false,p_reason:reason}
       });
-      toast('Ban définitif levé.');
+      toast('Ban definitif leve.');
       await sl60RenderAdmin();
       setTimeout(function(){sl60AdminTab('blacklist')},120);
     }catch(e){toast(friendlyError(e))}
@@ -2723,17 +2762,24 @@ window.addEventListener('pageshow',function(e){
 
       const items=Array.isArray(X.data.items)?X.data.items:[];
       if(!items.length){
-        panel.innerHTML='<div class="sl91Empty"><b>Blacklist vide</b><br>Aucun compte banni définitivement.</div>';
+        panel.innerHTML='<div class="sl91Empty"><b>Blacklist vide</b><br>Aucun compte sous verification ou banni definitivement.</div>';
       }else{
-        panel.innerHTML='<div class="panelHead"><div><h3>Blacklist</h3><div class="sub">Comptes bannis définitivement. Les signalements ne déclenchent jamais un ban automatique.</div></div></div>'+
+        panel.innerHTML='<div class="panelHead"><div><h3>Blacklist</h3><div class="sub">D abord verification. Ban definitif ghir ila la violation t2kkdat.</div></div><div class="sub">'+Number(X.data.under_review_count||0)+' sous verification • '+Number(X.data.banned_count||0)+' bannis</div></div>'+
           '<div class="sl91BlacklistGrid">'+items.map(function(x){
-            const unban=X.owner===true?'<button class="btn soft" onclick="sl91Unban(\''+x.user_id+'\',\''+attr(x.full_name||x.email||'ce compte')+'\')">Lever le ban</button>':'';
-            return '<div class="sl91BlackCard">'+
+            const pending=x.blacklist_status==='under_review';
+            let actions='<button class="btn soft" onclick="sl91OpenDetails(\''+x.user_id+'\')">Voir dossier / preuves</button>';
+            if(X.owner===true&&pending&&x.case_id){
+              actions+='<button class="btn primary" onclick="sl91Decide(\''+x.case_id+'\',\'cleared\',\''+attr(x.full_name||x.email||'ce compte')+'\')">Aucune violation — Restaurer</button>';
+              actions+='<button class="btn sl89DangerBtn" onclick="sl91Decide(\''+x.case_id+'\',\'confirmed\',\''+attr(x.full_name||x.email||'ce compte')+'\')">Confirmer le ban</button>';
+            }else if(X.owner===true&&!pending){
+              actions+='<button class="btn soft" onclick="sl91Unban(\''+x.user_id+'\',\''+attr(x.full_name||x.email||'ce compte')+'\')">Lever le ban</button>';
+            }
+            return '<div class="sl91BlackCard" style="'+(pending?'border-color:#f2cc77;background:#fffdf6':'')+'">'+
               '<div class="sl91BlackHead"><div><b style="font-size:16px">'+esc(x.full_name||'Utilisateur')+'</b><br><span class="sub">'+esc(x.email||'')+'</span>'+
-              '<div class="sl91BlackMeta"><span class="sl91Pill danger">⛔ Blacklist</span><span class="sl91Pill">'+esc(x.shop_name||'Sans boutique')+'</span><span class="sl91Pill">'+formatDate(x.banned_at)+'</span></div></div>'+
-              '<div class="sl91BlackMeta"><span class="sl91Pill">'+Number(x.reports_count||0)+' signalement(s)</span><span class="sl91Pill">'+Number(x.product_reports_count||0)+' produit(s) signalé(s)</span><span class="sl91Pill">'+Number(x.open_reports_count||0)+' ouvert(s)</span></div></div>'+
-              '<div class="sl91Reason"><b>Raison :</b> '+esc(x.reason||'Non précisée')+'</div>'+
-              '<div class="sl91Actions"><button class="btn soft" onclick="sl91OpenDetails(\''+x.user_id+'\')">Voir dossier / preuves</button>'+unban+'</div>'+
+              '<div class="sl91BlackMeta"><span class="sl91Pill '+(pending?'':'danger')+'" style="'+(pending?'background:#fff4d6;border-color:#f2cc77;color:#8a5a00':'')+'">'+(pending?'🟠 Sous verification':'⛔ Banni definitif')+'</span><span class="sl91Pill">'+esc(x.shop_name||'Sans boutique')+'</span><span class="sl91Pill">'+formatDate(x.status_at)+'</span></div></div>'+
+              '<div class="sl91BlackMeta"><span class="sl91Pill">'+Number(x.reports_count||0)+' signalement(s)</span><span class="sl91Pill">'+Number(x.product_reports_count||0)+' produit(s) signale(s)</span><span class="sl91Pill">'+Number(x.open_reports_count||0)+' ouvert(s)</span></div></div>'+
+              '<div class="sl91Reason"><b>'+(pending?'Raison verification :':'Raison ban :')+'</b> '+esc(x.reason||'Non precisee')+'</div>'+
+              '<div class="sl91Actions">'+actions+'</div>'+
             '</div>';
           }).join('')+'</div>';
       }
