@@ -2619,4 +2619,141 @@ window.addEventListener('pageshow',function(e){
 })();
 </script>
 
+
+<style id="sl91-blacklist-style">
+.sl91BlacklistGrid{display:grid;gap:12px}
+.sl91BlackCard{border:1px solid #f0c2c2;background:#fffafa;border-radius:14px;padding:14px}
+.sl91BlackHead{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
+.sl91BlackMeta{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.sl91Pill{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;background:#f1f4f2;border:1px solid #dfe6e2;font-size:10px;font-weight:800;color:#50605a}
+.sl91Pill.danger{background:#fee2e2;border-color:#fecaca;color:#991b1b}
+.sl91Reason{margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid #efdddd;line-height:1.45}
+.sl91Actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.sl91Evidence{display:grid;gap:9px;margin:12px 0}
+.sl91EvidenceRow{padding:10px 11px;border:1px solid #e4e9e6;border-radius:10px;background:#fff}
+.sl91EvidenceRow b{display:block;margin-bottom:3px}
+.sl91Audit{display:grid;gap:8px;margin-top:10px}
+.sl91Audit>div{padding:9px 10px;border:1px solid #e4e9e6;border-radius:10px;background:#f8faf9}
+.sl91Empty{padding:26px;text-align:center;color:#718078}
+@media(max-width:700px){.sl91BlackHead{flex-direction:column}}
+</style>
+<script id="sl91-blacklist">
+(function(){
+  const X={data:null,owner:null};
+  window.SL91=X;
+
+  function sl91ReportLabel(r){
+    const p=r.product_name?(' • Produit: '+r.product_name):'';
+    return (r.reason||'Signalement')+p;
+  }
+
+  window.sl91OpenDetails=function(userId){
+    const item=(X.data?.items||[]).find(x=>String(x.user_id)===String(userId));
+    if(!item)return;
+    document.querySelector('#sl91DetailsModal')?.remove();
+
+    const reports=Array.isArray(item.recent_reports)?item.recent_reports:[];
+    const history=Array.isArray(item.history)?item.history:[];
+
+    const reportHtml=reports.length?reports.map(function(r){
+      return '<div class="sl91EvidenceRow">'+
+        '<b>'+esc(sl91ReportLabel(r))+'</b>'+
+        '<div class="sub">'+esc(r.status||'open')+' • '+formatDate(r.created_at)+'</div>'+
+        (r.details?'<div style="margin-top:5px">'+esc(r.details)+'</div>':'')+
+        (r.id?'<button class="btn soft sl41-mini" style="margin-top:8px" onclick="document.querySelector(\'#sl91DetailsModal\').remove();sl70OpenReport(\''+r.id+'\')">Ouvrir le signalement</button>':'')+
+      '</div>';
+    }).join(''):'<div class="sl91Empty">Aucun signalement lié à cette boutique.</div>';
+
+    const historyHtml=history.length?history.map(function(h){
+      return '<div><b>'+(h.action==='ban'?'⛔ Ban définitif':'✅ Ban levé')+'</b><div>'+esc(h.reason||'Sans raison')+'</div><div class="sub">'+formatDate(h.created_at)+' • '+esc(h.actor||'Administration')+'</div></div>';
+    }).join(''):'<div class="sl91Empty">Aucun historique.</div>';
+
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="modal" id="sl91DetailsModal"><div class="modalBox">'+
+      '<div class="panelHead"><div><h2>Dossier Blacklist</h2><div class="sub">'+esc(item.full_name||'Utilisateur')+' • '+esc(item.email||'')+'</div></div><button class="modalX" onclick="document.querySelector(\'#sl91DetailsModal\').remove()">×</button></div>'+
+      '<div class="sl91Reason"><b>Raison du ban :</b><br>'+esc(item.reason||'Non précisée')+'</div>'+
+      '<h3 style="margin-top:18px">Signalements / preuves</h3><div class="sl91Evidence">'+reportHtml+'</div>'+
+      '<h3 style="margin-top:18px">Historique ban</h3><div class="sl91Audit">'+historyHtml+'</div>'+
+      '</div></div>'
+    );
+  };
+
+  window.sl91Unban=async function(userId,label){
+    if(X.owner!==true)return toast('Ghir Admin principal li y9der y7yed ban définitif.');
+    const word=prompt('Bach t7yed lban définitif mn '+label+', kteb DEBANNIR :','');
+    if(String(word||'').trim().toUpperCase()!=='DEBANNIR')return;
+    const reason=prompt('Note optionnelle :','Décision annulée par Admin principal')||'';
+    try{
+      await api('/rest/v1/rpc/admin_set_permanent_ban',{
+        method:'POST',auth:true,
+        body:{p_user_id:userId,p_banned:false,p_reason:reason}
+      });
+      toast('Ban définitif levé.');
+      await sl60RenderAdmin();
+      setTimeout(function(){sl60AdminTab('blacklist')},120);
+    }catch(e){toast(friendlyError(e))}
+  };
+
+  window.sl91LoadBlacklist=async function(){
+    const tabs=document.querySelector('.sl60AdminTabs');
+    if(!tabs)return;
+    try{
+      const results=await Promise.all([
+        api('/rest/v1/rpc/get_admin_blacklist_dashboard',{method:'POST',auth:true,body:{}}),
+        api('/rest/v1/rpc/is_platform_owner',{method:'POST',auth:true,body:{}})
+      ]);
+      X.data=results[0]||{count:0,items:[]};
+      X.owner=results[1]===true;
+
+      let btn=tabs.querySelector('[data-tab="blacklist"]');
+      if(!btn){
+        btn=document.createElement('button');
+        btn.className='btn soft';
+        btn.dataset.tab='blacklist';
+        btn.onclick=function(){sl60AdminTab('blacklist')};
+        tabs.appendChild(btn);
+      }
+      btn.textContent='Blacklist'+(Number(X.data.count||0)?' ('+Number(X.data.count||0)+')':'');
+
+      document.querySelector('[data-sl60-panel="blacklist"]')?.remove();
+      const panel=document.createElement('div');
+      panel.className='panel';
+      panel.dataset.sl60Panel='blacklist';
+      panel.style.display='none';
+
+      const items=Array.isArray(X.data.items)?X.data.items:[];
+      if(!items.length){
+        panel.innerHTML='<div class="sl91Empty"><b>Blacklist vide</b><br>Aucun compte banni définitivement.</div>';
+      }else{
+        panel.innerHTML='<div class="panelHead"><div><h3>Blacklist</h3><div class="sub">Comptes bannis définitivement. Les signalements ne déclenchent jamais un ban automatique.</div></div></div>'+
+          '<div class="sl91BlacklistGrid">'+items.map(function(x){
+            const unban=X.owner===true?'<button class="btn soft" onclick="sl91Unban(\''+x.user_id+'\',\''+attr(x.full_name||x.email||'ce compte')+'\')">Lever le ban</button>':'';
+            return '<div class="sl91BlackCard">'+
+              '<div class="sl91BlackHead"><div><b style="font-size:16px">'+esc(x.full_name||'Utilisateur')+'</b><br><span class="sub">'+esc(x.email||'')+'</span>'+
+              '<div class="sl91BlackMeta"><span class="sl91Pill danger">⛔ Blacklist</span><span class="sl91Pill">'+esc(x.shop_name||'Sans boutique')+'</span><span class="sl91Pill">'+formatDate(x.banned_at)+'</span></div></div>'+
+              '<div class="sl91BlackMeta"><span class="sl91Pill">'+Number(x.reports_count||0)+' signalement(s)</span><span class="sl91Pill">'+Number(x.product_reports_count||0)+' produit(s) signalé(s)</span><span class="sl91Pill">'+Number(x.open_reports_count||0)+' ouvert(s)</span></div></div>'+
+              '<div class="sl91Reason"><b>Raison :</b> '+esc(x.reason||'Non précisée')+'</div>'+
+              '<div class="sl91Actions"><button class="btn soft" onclick="sl91OpenDetails(\''+x.user_id+'\')">Voir dossier / preuves</button>'+unban+'</div>'+
+            '</div>';
+          }).join('')+'</div>';
+      }
+      tabs.parentElement.appendChild(panel);
+    }catch(e){
+      console.warn('Blacklist:',e);
+    }
+  };
+
+  const OLD_ADMIN=window.sl60RenderAdmin;
+  if(OLD_ADMIN){
+    window.sl60RenderAdmin=async function(){
+      const r=await OLD_ADMIN();
+      await Promise.resolve(r);
+      setTimeout(sl91LoadBlacklist,80);
+      return r;
+    };
+    sl60RenderAdmin=window.sl60RenderAdmin;
+  }
+})();
+</script>
+
 </body></html>
