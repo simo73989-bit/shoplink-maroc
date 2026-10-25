@@ -1436,10 +1436,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     };
     if(showPending())return;
     const observer=new MutationObserver(function(){
-      if(!document.querySelector('#modal')){
-        observer.disconnect();
-        setTimeout(showPending,0);
-      }
+      if(!document.querySelector('#modal')&&showPending())observer.disconnect();
     });
     observer.observe(document.body,{childList:true,subtree:true});
   },900);
