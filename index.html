@@ -200,7 +200,7 @@ async function checkBackendReady(){
   if(!REMOTE){BACKEND_READY=false;return false;}
   try{
     const r=await fetch(`${SUPABASE_URL}/rest/v1/shops?select=id&limit=1`,{headers:{apikey:SUPABASE_KEY}});
-    BACKEND_READY = r.ok || (r.status!==404 && r.status!==0);
+    BACKEND_READY = r.ok && Array.isArray(await r.json().catch(()=>null));
     return BACKEND_READY;
   }catch{BACKEND_READY=false;return false;}
 }
@@ -1123,7 +1123,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   window.ordersTable=function(limit){
     const arr=limit?state.orders.slice(0,limit):state.orders;if(!arr.length)return `<div class="empty">Aucune commande pour le moment.</div>`;
     return `<div class="tableWrap"><table class="table"><thead><tr><th>Client</th><th>Total</th><th>Articles</th><th>Date</th><th>Statut</th><th>Actions</th></tr></thead><tbody>${arr.map(o=>{
-      const cnt=Array.isArray(o.items)?o.items.reduce((s,x)=>s+Number(x.qty||1),0):0,unlocked=o.contact_unlocked===true,phone=esc(o.phone||'••••••••••');
+      const cnt=Array.isArray(o.items)?o.items.reduce((s,x)=>s+Number(x.qty||1),0):0,unlocked=o.contact_unlocked===true,phone=unlocked?esc(o.phone||'—'):'••••••••••';
       const addressBlock=unlocked
         ? (o.address?`<br><span class="sub">📍 ${esc(o.address)}</span><br><button type="button" class="btn soft sl41-mini" style="margin-top:6px" onclick="sl52OpenMaps('${o.id}')">🗺️ Ouvrir dans Maps</button>`:`<br><span class="sub">Adresse non renseignée</span>`)
         : `<br><span class="sub">🔒 Adresse + localisation masquées</span>`;
@@ -1135,7 +1135,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     if(el){el.value=status;return sl52ChangeStatus(el,id)}
   };
   window.sl41DeleteOrder=async function(id){if(!confirm('Supprimer cette commande ?'))return;try{if(REMOTE)await api('/rest/v1/rpc/seller_delete_order',{method:'POST',auth:true,body:{p_order_id:id}});state.orders=state.orders.filter(o=>String(o.id)!==String(id));if(!REMOTE)DB.set('sl_orders',state.orders);toast('Commande supprimée ✅');dashTab('orders')}catch(e){toast(friendlyError(e))}};
-  window.sl41PrintOrder=function(id){const o=state.orders.find(x=>String(x.id)===String(id));if(!o)return;const items=(o.items||[]).map(i=>`<tr><td>${esc(i.qty)}× ${esc(i.name)}</td><td style="text-align:right">${money(Number(i.price)*Number(i.qty||1))}</td></tr>`).join('');const w=window.open('','_blank','width=520,height=720');if(!w)return toast('Autorisez les fenêtres pop-up pour imprimer.');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Commande #${esc(sl41OrderRef(o))}</title><style>body{font-family:system-ui;padding:24px;color:#111}h1{font-size:20px}table{width:100%;border-collapse:collapse}td{padding:7px 0;border-bottom:1px dashed #bbb}.total{font-size:20px;font-weight:800;text-align:right;margin-top:15px}.muted{color:#666;font-size:12px}</style></head><body><h1>ShopLink Maroc — #${esc(sl41OrderRef(o))}</h1><p><b>${esc(o.customer_name||'Client')}</b><br>${esc(o.phone||'')}<br>${esc(o.city||'')} ${esc(o.address||'')}</p><p class="muted">${esc(o.delivery_method||'')} • ${esc(formatDate(o.created_at))}</p><table>${items}</table><div class="total">${money(o.total)}</div><script>window.onload=()=>window.print()<\/script>
+  window.sl41PrintOrder=function(id){const o=state.orders.find(x=>String(x.id)===String(id));if(!o)return;const items=(o.items||[]).map(i=>`<tr><td>${esc(i.qty)}× ${esc(i.name)}</td><td style="text-align:right">${money(Number(i.price)*Number(i.qty||1))}</td></tr>`).join('');const w=window.open('','_blank','width=520,height=720');if(!w)return toast('Autorisez les fenêtres pop-up pour imprimer.');w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Commande #${esc(sl41OrderRef(o))}</title><style>body{font-family:system-ui;padding:24px;color:#111}h1{font-size:20px}table{width:100%;border-collapse:collapse}td{padding:7px 0;border-bottom:1px dashed #bbb}.total{font-size:20px;font-weight:800;text-align:right;margin-top:15px}.muted{color:#666;font-size:12px}</style></head><body><h1>ShopLink Maroc — #${esc(sl41OrderRef(o))}</h1><p><b>${esc(o.customer_name||'Client')}</b><br>${esc(o.contact_unlocked===true?(o.phone||''):'🔒 Coordonnées verrouillées')}<br>${esc(o.city||'')} ${esc(o.contact_unlocked===true?(o.address||''):'')}</p><p class="muted">${esc(o.delivery_method||'')} • ${esc(formatDate(o.created_at))}</p><table>${items}</table><div class="total">${money(o.total)}</div><script>window.onload=()=>window.print()<\/script>
 
 
 
@@ -1305,16 +1305,11 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   }
   window.sl54SendOtp=async function(){
     const s=sl54OtpState;if(!s)return;
+    s.testMode=false;s.testOnly=false;
     const cooldownAt=Math.max(Number(s.resendAt||0),sl54GetResendAt(s.phone));
     s.resendAt=cooldownAt;
     if(cooldownAt>Date.now()){
       sl54OtpModal(s.testOnly===true?'Mode test activé. Entrez votre code test privé.':'Attendez la fin du délai avant de renvoyer le code.');
-      return;
-    }
-    if(s.testMode===true){
-      s.testOnly=true;
-      sl54SetResendAt(s.phone,60000);
-      sl54OtpModal('Mode test activé. Entrez votre code test privé.');
       return;
     }
     const e164=sl54PhoneE164(s.phone);if(!e164)return toast('Numéro invalide.');
@@ -1326,9 +1321,8 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       sl54SetResendAt(s.phone,60000);
       sl54OtpModal('Code envoyé. Vous pourrez le renvoyer dans 60 secondes.');
     }catch(e){
-      s.testOnly=true;
-      sl54SetResendAt(s.phone,60000);
-      sl54OtpModal('Le service SMS OTP n’est pas encore configuré. Pour vos essais, utilisez votre code test privé.');
+      s.testOnly=false;
+      sl54OtpModal('Impossible d’envoyer le SMS. Vérifiez le numéro et réessayez plus tard. Aucun code test n’est accepté.');
     }
   };
   window.sl54VerifyOtp=async function(){
@@ -1338,23 +1332,17 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     setBusy('#sl54VerifyBtn',true,'Vérification…');
     let access='';
     try{
-      let testVerified=false;
+      const e164=sl54PhoneE164(s.phone);
+      if(!e164)throw new Error('Numéro invalide');
+      const vr=await fetch(SUPABASE_URL+'/auth/v1/verify',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({type:'sms',phone:e164,token})});
+      const vd=await vr.json().catch(()=>({}));
+      if(!vr.ok||!vd.access_token)throw new Error(vd.msg||vd.message||'Code incorrect ou expiré');
+      access=vd.access_token;
       try{
-        await api('/rest/v1/rpc/verify_order_phone_test_guest',{method:'POST',auth:false,body:{p_order_id:s.orderId,p_phone:s.phone,p_code:token}});
-        testVerified=true;
-      }catch(te){
-        if(!/invalid_test_code/i.test(String(te?.message||te||'')))throw te;
-        if(s.testOnly===true)throw te;
-      }
-      if(!testVerified){
-        const e164=sl54PhoneE164(s.phone);
-        const vr=await fetch(SUPABASE_URL+'/auth/v1/verify',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({type:'sms',phone:e164,token})});
-        const vd=await vr.json().catch(()=>({}));
-        if(!vr.ok||!vd.access_token)throw new Error(vd.msg||vd.message||'Code incorrect ou expiré');
-        access=vd.access_token;
         const rr=await fetch(SUPABASE_URL+'/rest/v1/rpc/verify_order_phone',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access,'Content-Type':'application/json'},body:JSON.stringify({p_order_id:s.orderId})});
         const rd=await rr.json().catch(()=>({}));
         if(!rr.ok)throw new Error(rd.message||rd.error||'Vérification impossible');
+      }finally{
         try{await fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access}})}catch{}
       }
       try{
@@ -1393,14 +1381,23 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       const ref=result?.order_number||String(result?.id||'').replace(/-/g,'').slice(0,8).toUpperCase();
       state.cart=[];try{sessionStorage.removeItem(ckey())}catch{}
       document.querySelector('#modal')?.remove();renderCart();
-      const signedInTest=!!(state.user?.id&&state.session);
       const resendAt=sl54GetResendAt(phone);
-      sl54OtpState={orderId:result?.id,phone,name,ref,expiresAt:result?.verification_expires_at||'',testMode:signedInTest,resendAt};
+      sl54OtpState={orderId:result?.id,phone,name,ref,expiresAt:result?.verification_expires_at||'',testMode:false,testOnly:false,resendAt};
       try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState))}catch{}
       sl54OtpModal('Envoi du code OTP…');
       await sl54SendOtp();
     }catch(e){toast(friendlyError(e));setBusy('#orderBtn',false,'Confirmer la commande')}
   };
+
+  // Restaurer la verification d'une commande deja creee apres actualisation.
+  setTimeout(function(){
+    let pending=null;
+    try{pending=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null')}catch{}
+    if(!pending||!pending.orderId||!sl54PhoneE164(pending.phone))return;
+    if(document.querySelector('#modal'))return;
+    sl54OtpState={...pending,testMode:false,testOnly:false};
+    sl54OtpModal('Commande en attente : reprenez la vérification SMS sans créer une nouvelle commande.');
+  },900);
 
   window.shopUrl=function(slug){return `${location.origin}/store/${encodeURIComponent(slug||'ma-boutique')}`};
   window.openMyStore=function(){if(window.slsecShopReady&&!window.slsecShopReady(state.shop)){toast('Complétez d’abord Ma boutique : nom, ville et numéro WhatsApp valide.');if(document.querySelector('#dashMain'))dashTab('shop');else{go('dashboard');setTimeout(()=>dashTab('shop'),80)}return}location.href=shopUrl(state.shop.slug)};
@@ -1511,9 +1508,11 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     const items=(o.items||[]).map(function(x){
       return '<div class="sl60Item"><span><b>'+Number(x.qty||1)+' x</b> '+esc(x.name||'Article')+'</span><b>'+money(Number(x.price||0)*Number(x.qty||1))+'</b></div>';
     }).join('');
-    const address=unlocked&&o.address?'<p><b>Adresse:</b> '+esc(o.address)+'</p><button class="btn soft full" onclick="window.open(\''+sl60MapsUrl(o.address)+'\',\'_blank\',\'noopener\')">Ouvrir dans Maps</button>':'<p class="sub">Adresse et localisation masquees avant deblocage.</p>';
+    const address=unlocked&&o.address?'<p><b>Adresse:</b> '+esc(o.address)+'</p><button class="btn soft full" data-sl60-open-maps="1">Ouvrir dans Maps</button>':'<p class="sub">Adresse et localisation masquees avant deblocage.</p>';
     document.querySelector('#modal')?.remove();
-    document.body.insertAdjacentHTML('beforeend','<div class="modal" id="modal"><div class="modalBox"><div class="panelHead"><div><h2>Commande #'+esc(sl60Ref(o))+'</h2><div class="sub">'+formatDate(o.created_at)+'</div></div><button class="closeBtn" onclick="document.querySelector(\'#modal\').remove()">x</button></div><div style="margin:12px 0"><span class="sl41-adminBadge '+(o.phone_verified?'':'off')+'">'+(o.phone_verified?'Numero verifie':'En attente OTP')+'</span> <span class="sl41-adminBadge '+(unlocked?'':'off')+'">'+(unlocked?'Coordonnees ouvertes':'Coordonnees protegees')+'</span></div><p><b>Client:</b> '+esc(o.customer_name||'Client')+'<br><b>Telephone:</b> '+esc(o.phone||'')+'<br><b>Ville:</b> '+esc(o.city||'—')+'<br><b>Livraison:</b> '+esc(o.delivery_method||'—')+'<br><b>Statut:</b> '+esc(sl60StatusLabel(o.status))+'</p>'+address+(o.note?'<p><b>Note:</b> '+esc(o.note)+'</p>':'')+'<h3>Articles</h3><div class="sl60Items">'+items+'</div><div class="panelHead" style="margin-top:16px"><b>Total</b><b>'+money(o.total)+'</b></div></div></div>');
+    document.body.insertAdjacentHTML('beforeend','<div class="modal" id="modal"><div class="modalBox"><div class="panelHead"><div><h2>Commande #'+esc(sl60Ref(o))+'</h2><div class="sub">'+formatDate(o.created_at)+'</div></div><button class="closeBtn" onclick="document.querySelector(\'#modal\').remove()">x</button></div><div style="margin:12px 0"><span class="sl41-adminBadge '+(o.phone_verified?'':'off')+'">'+(o.phone_verified?'Numero verifie':'En attente OTP')+'</span> <span class="sl41-adminBadge '+(unlocked?'':'off')+'">'+(unlocked?'Coordonnees ouvertes':'Coordonnees protegees')+'</span></div><p><b>Client:</b> '+esc(o.customer_name||'Client')+'<br><b>Telephone:</b> '+esc(unlocked?(o.phone||''):'🔒 Masqué')+'<br><b>Ville:</b> '+esc(o.city||'—')+'<br><b>Livraison:</b> '+esc(o.delivery_method||'—')+'<br><b>Statut:</b> '+esc(sl60StatusLabel(o.status))+'</p>'+address+(o.note?'<p><b>Note:</b> '+esc(o.note)+'</p>':'')+'<h3>Articles</h3><div class="sl60Items">'+items+'</div><div class="panelHead" style="margin-top:16px"><b>Total</b><b>'+money(o.total)+'</b></div></div></div>');
+    const mapsButton=document.querySelector('#modal [data-sl60-open-maps]');
+    if(mapsButton)mapsButton.addEventListener('click',function(){const url=sl60MapsUrl(o.address);if(url)window.open(url,'_blank','noopener')});
   };
 
   async function sl60LoadNotifications(silent){
@@ -2873,14 +2872,14 @@ window.addEventListener('pageshow',function(e){
         panel.innerHTML='<div class="sl91Empty"><b>Blacklist vide</b><br>Aucun compte sous verification ou banni definitivement.</div>';
       }else{
         panel.innerHTML='<div class="panelHead"><div><h3>Blacklist</h3><div class="sub">D abord verification. Ban definitif ghir ila la violation t2kkdat.</div></div><div class="sub">'+Number(X.data.under_review_count||0)+' sous verification • '+Number(X.data.banned_count||0)+' bannis</div></div>'+
-          '<div class="sl91BlacklistGrid">'+items.map(function(x){
+          '<div class="sl91BlacklistGrid">'+items.map(function(x,i){
             const pending=x.blacklist_status==='under_review';
-            let actions='<button class="btn soft" onclick="sl91OpenDetails(\''+x.user_id+'\')">Voir dossier / preuves</button>';
+            let actions='<button class="btn soft" data-sl91-action="details" data-sl91-index="'+i+'">Voir dossier / preuves</button>';
             if(X.owner===true&&pending&&x.case_id){
-              actions+='<button class="btn primary" onclick="sl91Decide(\''+x.case_id+'\',\'cleared\',\''+attr(x.full_name||x.email||'ce compte')+'\')">Aucune violation — Restaurer</button>';
-              actions+='<button class="btn sl89DangerBtn" onclick="sl91Decide(\''+x.case_id+'\',\'confirmed\',\''+attr(x.full_name||x.email||'ce compte')+'\')">Confirmer le ban</button>';
+              actions+='<button class="btn primary" data-sl91-action="cleared" data-sl91-index="'+i+'">Aucune violation — Restaurer</button>';
+              actions+='<button class="btn sl89DangerBtn" data-sl91-action="confirmed" data-sl91-index="'+i+'">Confirmer le ban</button>';
             }else if(X.owner===true&&!pending){
-              actions+='<button class="btn soft" onclick="sl91Unban(\''+x.user_id+'\',\''+attr(x.full_name||x.email||'ce compte')+'\')">Lever le ban</button>';
+              actions+='<button class="btn soft" data-sl91-action="unban" data-sl91-index="'+i+'">Lever le ban</button>';
             }
             return '<div class="sl91BlackCard" style="'+(pending?'border-color:#f2cc77;background:#fffdf6':'')+'">'+
               '<div class="sl91BlackHead"><div><b style="font-size:16px">'+esc(x.full_name||'Utilisateur')+'</b><br><span class="sub">'+esc(x.email||'')+'</span>'+
@@ -2891,6 +2890,18 @@ window.addEventListener('pageshow',function(e){
             '</div>';
           }).join('')+'</div>';
       }
+      panel.addEventListener('click',function(event){
+        const button=event.target.closest('button[data-sl91-action]');
+        if(!button||!panel.contains(button))return;
+        const x=items[Number(button.dataset.sl91Index)];
+        if(!x)return;
+        const label=String(x.full_name||x.email||'ce compte');
+        if(button.dataset.sl91Action==='details')return sl91OpenDetails(x.user_id);
+        if(X.owner!==true)return;
+        if(button.dataset.sl91Action==='cleared'&&x.case_id&&x.blacklist_status==='under_review')return sl91Decide(x.case_id,'cleared',label);
+        if(button.dataset.sl91Action==='confirmed'&&x.case_id&&x.blacklist_status==='under_review')return sl91Decide(x.case_id,'confirmed',label);
+        if(button.dataset.sl91Action==='unban'&&x.blacklist_status!=='under_review')return sl91Unban(x.user_id,label);
+      });
       tabs.parentElement.appendChild(panel);
     }catch(e){
       console.warn('Blacklist:',e);
