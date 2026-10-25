@@ -1215,6 +1215,23 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   };
   let sl54OtpState=null;
   let sl54ResendTimer=null;
+  let sl54SendingOtp=false;
+  function sl54RetryAfterMs(value){
+    const raw=String(value||'').trim();
+    const ms=/^\d+$/.test(raw)?Number(raw)*1000:(Date.parse(raw)-Date.now());
+    return Number.isFinite(ms)?Math.min(86400000,Math.max(60000,ms)):60000;
+  }
+  function sl54Expired(s){
+    const t=Date.parse(String(s?.expiresAt||''));
+    return Number.isFinite(t)&&t<=Date.now();
+  }
+  function sl54RejectExpired(){
+    if(!sl54OtpState||!sl54Expired(sl54OtpState))return false;
+    sl54OtpState=null;
+    try{sessionStorage.removeItem('sl54_pending_order')}catch{}
+    toast('Le délai de vérification est expiré. Vérifiez le statut de votre commande avant toute nouvelle tentative.');
+    return true;
+  }
   function sl54CooldownKey(phone=''){
     return 'sl54_otp_resend_at_'+String(phone||'').replace(/\D/g,'');
   }
@@ -1268,7 +1285,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     return d.slice(0,3)+' •• •• •• '+d.slice(-2);
   }
   function sl54OtpModal(message=''){
-    const s=sl54OtpState;if(!s)return;
+    const s=sl54OtpState;if(!s||sl54RejectExpired())return;
     document.querySelector('#modal')?.remove();
 
     const modal=document.createElement('div');modal.className='modal';modal.id='modal';
@@ -1304,29 +1321,43 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     sl54RenderResendCooldown(resend);
   }
   window.sl54SendOtp=async function(){
-    const s=sl54OtpState;if(!s)return;
+    const s=sl54OtpState;
+    if(!s||sl54SendingOtp||sl54RejectExpired())return;
     s.testMode=false;s.testOnly=false;
     const cooldownAt=Math.max(Number(s.resendAt||0),sl54GetResendAt(s.phone));
     s.resendAt=cooldownAt;
     if(cooldownAt>Date.now()){
-      sl54OtpModal(s.testOnly===true?'Mode test activé. Entrez votre code test privé.':'Attendez la fin du délai avant de renvoyer le code.');
+      sl54OtpModal('Attendez la fin du délai avant de renvoyer le code.');
       return;
     }
-    const e164=sl54PhoneE164(s.phone);if(!e164)return toast('Numéro invalide.');
+    const e164=sl54PhoneE164(s.phone);
+    if(!e164)return toast('Numéro invalide.');
+    sl54SendingOtp=true;
+    const resendBtn=document.querySelector('#sl54ResendBtn');
+    if(resendBtn){resendBtn.disabled=true;resendBtn.textContent='Envoi…'}
     try{
       const r=await fetch(SUPABASE_URL+'/auth/v1/otp',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({phone:e164})});
       const d=await r.json().catch(()=>({}));
-      if(!r.ok)throw new Error(d.msg||d.message||d.error_description||'Service SMS indisponible');
-      s.testOnly=false;
+      if(!r.ok){
+        const e=new Error(d.msg||d.message||d.error_description||'Service SMS indisponible');
+        e.status=r.status;e.retryAfter=r.headers?.get('Retry-After')||'';
+        throw e;
+      }
       sl54SetResendAt(s.phone,60000);
       sl54OtpModal('Code envoyé. Vous pourrez le renvoyer dans 60 secondes.');
     }catch(e){
-      s.testOnly=false;
-      sl54OtpModal('Impossible d’envoyer le SMS. Vérifiez le numéro et réessayez plus tard. Aucun code test n’est accepté.');
+      const throttled=e?.status===429;
+      const cooldown=throttled?sl54RetryAfterMs(e.retryAfter):30000;
+      sl54SetResendAt(s.phone,cooldown);
+      sl54OtpModal(throttled
+        ? 'Trop de demandes SMS. Attendez la fin du délai affiché avant de réessayer.'
+        : 'Impossible d’envoyer le SMS. Réessayez après le délai affiché. Aucun code test n’est accepté.');
+    }finally{
+      sl54SendingOtp=false;
     }
   };
   window.sl54VerifyOtp=async function(){
-    const s=sl54OtpState;if(!s)return;
+    const s=sl54OtpState;if(!s||sl54RejectExpired())return;
     const token=(document.querySelector('#sl54OtpCode')?.value||'').replace(/\D/g,'');
     if(token.length!==6)return toast('Entrez le code OTP à 6 chiffres.');
     setBusy('#sl54VerifyBtn',true,'Vérification…');
@@ -1389,14 +1420,28 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     }catch(e){toast(friendlyError(e));setBusy('#orderBtn',false,'Confirmer la commande')}
   };
 
-  // Restaurer la verification d'une commande deja creee apres actualisation.
+  // Reprendre une commande après actualisation sans interrompre une autre fenêtre.
   setTimeout(function(){
     let pending=null;
     try{pending=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null')}catch{}
     if(!pending||!pending.orderId||!sl54PhoneE164(pending.phone))return;
-    if(document.querySelector('#modal'))return;
     sl54OtpState={...pending,testMode:false,testOnly:false};
-    sl54OtpModal('Commande en attente : reprenez la vérification SMS sans créer une nouvelle commande.');
+    if(sl54RejectExpired())return;
+    const showPending=function(){
+      if(!sl54OtpState||sl54OtpState.orderId!==pending.orderId)return true;
+      if(sl54RejectExpired())return true;
+      if(document.querySelector('#modal'))return false;
+      sl54OtpModal('Commande en attente : reprenez la vérification SMS sans créer une nouvelle commande.');
+      return true;
+    };
+    if(showPending())return;
+    const observer=new MutationObserver(function(){
+      if(!document.querySelector('#modal')){
+        observer.disconnect();
+        setTimeout(showPending,0);
+      }
+    });
+    observer.observe(document.body,{childList:true,subtree:true});
   },900);
 
   window.shopUrl=function(slug){return `${location.origin}/store/${encodeURIComponent(slug||'ma-boutique')}`};
