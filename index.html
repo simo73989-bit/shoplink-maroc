@@ -1215,9 +1215,9 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     document.body.insertAdjacentHTML('beforeend',`<div class="modal" id="modal"><div class="modalBox"><div class="panelHead"><h2>Finaliser la commande</h2><button class="modalX" onclick="document.querySelector('#modal').remove()">×</button></div><div class="cartLines" id="checkoutCartLines">${cartLinesHtml()}</div><div class="field"><label>Mode de réception</label><select id="slxMode"><option value="À convenir">À convenir avec le vendeur</option><option value="Livraison">Livraison</option><option value="À emporter">À emporter</option><option value="Sur place">Sur place</option><option value="Retrait / rendez-vous">Retrait / rendez-vous</option></select></div><div class="twoCols"><div class="field"><label>Votre nom</label><input id="cName" autocomplete="name" placeholder="Nom complet"></div><div class="field"><label>Téléphone</label><input id="cPhone" inputmode="tel" autocomplete="tel" placeholder="06XXXXXXXX"></div></div><div class="twoCols"><div class="field"><label>Ville</label><input id="cCity" autocomplete="address-level2" value="${attr(state.publicShop?.city||'')}" placeholder="Ex: Salé"></div><div class="field"><label>Adresse</label><input id="cAddress" autocomplete="street-address" placeholder="Quartier, rue, lieu…"></div></div><button type="button" id="slxGpsBtn" class="btn soft full" onclick="slxUseLocation()">📍 Utiliser ma localisation pour l’adresse</button><div class="field"><label>Note (optionnel)</label><textarea id="cNote" rows="3" placeholder="Taille, couleur, détails…"></textarea></div><div class="modalActions"><button class="btn soft" onclick="document.querySelector('#modal').remove()">Annuler</button><button id="orderBtn" class="btn primary" onclick="placeOrder()">Confirmer la commande</button></div></div></div>`)
   };
 
-  window.slxSavePublicOrder=async function(order){
+  window.slxSavePublicOrder=async function(order,requestId,rpcPayload){
     if(!REMOTE){if(state.publicShop.slug===state.shop.slug){const local={id:crypto.randomUUID(),order_number:Math.random().toString(36).slice(2,10).toUpperCase(),...order,phone:String(order.phone).slice(0,3)+'•••••'+String(order.phone).slice(-2),contact_unlocked:false,created_at:new Date().toISOString()};state.orders.unshift(local);DB.set('sl_orders',state.orders);return local}return {id:crypto.randomUUID()}}
-    return api('/rest/v1/rpc/place_public_order_idempotent',{method:'POST',auth:false,body:{p_request_id:order.requestId,p_shop_id:order.shop_id,p_customer_name:order.customer_name,p_phone:order.phone,p_city:order.city,p_address:order.address,p_delivery_method:order.delivery_method,p_note:order.note,p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))}})
+    return api('/rest/v1/rpc/place_public_order_idempotent',{method:'POST',auth:false,body:{p_request_id:requestId,...rpcPayload}})
   };
   let sl54OtpState=null;
   let sl54ResendTimer=null;
@@ -1439,35 +1439,131 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       sl54VerifyingKeys.delete(requestKey);
     }
   };
+  // One durable record spans RPC uncertainty and the verified-created phase.
+  const sl65AttemptKey='sl54_order_attempt';
+  let sl65PlacingOrder=false;
+  let sl65AttemptMemory=null;
+  function sl65Payload(order){
+    return {
+      p_shop_id:order.shop_id,
+      p_customer_name:order.customer_name,
+      p_phone:order.phone,
+      p_city:order.city,
+      p_address:order.address,
+      p_delivery_method:order.delivery_method,
+      p_note:order.note,
+      p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))
+    };
+  }
+  function sl65ReadAttempt(){
+    try{
+      const raw=sessionStorage.getItem(sl65AttemptKey);
+      const stored=raw?JSON.parse(raw):null;
+      if(stored?.id&&stored?.body&&['pending','created'].includes(stored.phase)){
+        sl65AttemptMemory=stored;
+        return stored;
+      }
+    }catch{}
+    return sl65AttemptMemory;
+  }
+  function sl65PersistAttempt(attempt){
+    const raw=JSON.stringify(attempt);
+    sessionStorage.setItem(sl65AttemptKey,raw);
+    if(sessionStorage.getItem(sl65AttemptKey)!==raw)throw new Error('stockage_temporaire_indisponible');
+    sl65AttemptMemory=attempt;
+  }
+  function sl65ClearCreatedAttempt(orderId){
+    const latest=sl65ReadAttempt();
+    if(latest?.phase==='created'&&String(latest.otpState?.orderId)===String(orderId)){
+      try{sessionStorage.removeItem(sl65AttemptKey)}catch{}
+      sl65AttemptMemory=null;
+    }
+  }
   window.placeOrder=async function(){
-    const name=document.querySelector('#cName')?.value.trim()||'',phone=document.querySelector('#cPhone')?.value.trim()||'',city=document.querySelector('#cCity')?.value.trim()||'',address=document.querySelector('#cAddress')?.value.trim()||'',note=document.querySelector('#cNote')?.value.trim()||'',mode=document.querySelector('#slxMode')?.value||'À convenir';
-    if(name.length<2)return toast('Ajoutez votre nom.');if(!sl41PhoneOk(phone))return toast('Ajoutez un numéro marocain valide.');if(city.length<2)return toast('Ajoutez votre ville.');if(mode==='Livraison'&&address.length<3)return toast('Ajoutez une adresse de livraison.');
-    const order={shop_id:state.publicShop.id,customer_name:name,phone,city,address,delivery_method:mode,note,items:state.cart.map(p=>({product_id:p.id,name:p.name,qty:Number(p.qty||1),price:Number(p.price)}))};
-    // Preserve one stable id across retries and refreshes for the same payload.
-    const fingerprint=JSON.stringify(order);
-    let previous=null;
-    try{previous=JSON.parse(sessionStorage.getItem('sl54_order_attempt')||'null')}catch{}
-    order.requestId=(previous&&previous.fingerprint===fingerprint&&/^[0-9a-f-]{36}$/i.test(previous.id||''))?previous.id:crypto.randomUUID();
-    try{sessionStorage.setItem('sl54_order_attempt',JSON.stringify({id:order.requestId,fingerprint}))}catch{}
+    if(sl65PlacingOrder)return;
+    const name=document.querySelector('#cName')?.value.trim()||'';
+    const phone=document.querySelector('#cPhone')?.value.trim()||'';
+    const city=document.querySelector('#cCity')?.value.trim()||'';
+    const address=document.querySelector('#cAddress')?.value.trim()||'';
+    const note=document.querySelector('#cNote')?.value.trim()||'';
+    const mode=document.querySelector('#slxMode')?.value||'À convenir';
+    const order={shop_id:state.publicShop.id,customer_name:name,phone,city,address,
+      delivery_method:mode,note,
+      items:state.cart.map(p=>({product_id:p.id,name:p.name,qty:Number(p.qty||1),price:Number(p.price)}))};
+    let previous=sl65ReadAttempt();
+    if(!previous){
+      if(name.length<2)return toast('Ajoutez votre nom.');
+      if(!sl41PhoneOk(phone))return toast('Ajoutez un numéro marocain valide.');
+      if(city.length<2)return toast('Ajoutez votre ville.');
+      if(mode==='Livraison'&&address.length<3)return toast('Ajoutez une adresse de livraison.');
+    }
+    sl65PlacingOrder=true;
     setBusy('#orderBtn',true,'Envoi…');
     try{
-      const result=await slxSavePublicOrder(order);
-      try{sessionStorage.removeItem('sl54_order_attempt')}catch{}
-      const ref=result?.order_number||String(result?.id||'').replace(/-/g,'').slice(0,8).toUpperCase();
-      state.cart=[];try{sessionStorage.removeItem(ckey())}catch{}
-      document.querySelector('#modal')?.remove();renderCart();
-      const resendAt=sl54GetResendAt(phone);
-      sl54OtpState={orderId:result?.id,phone,name,ref,expiresAt:result?.verification_expires_at||'',testMode:false,testOnly:false,resendAt};
-      try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState))}catch{}
+      if(previous?.phase==='created'&&previous.otpState?.orderId){
+        sl54OtpState={...previous.otpState,testMode:false,testOnly:false};
+        try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState))}catch{}
+        document.querySelector('#modal')?.remove();
+        sl54OtpModal('Cette commande existe déjà. Reprenez sa vérification; aucune nouvelle commande créée.');
+        return;
+      }
+      if(!previous){
+        previous={id:crypto.randomUUID(),phase:'pending',body:sl65Payload(order),createdAt:Date.now()};
+        try{sl65PersistAttempt(previous)}catch{
+          throw new Error('Stockage temporaire bloqué. Aucune commande envoyée. Activez le stockage de session pour garantir la reprise.');
+        }
+      }else if(JSON.stringify(previous.body)!==JSON.stringify(sl65Payload(order))){
+        toast('Une commande précédente reste incertaine. La reprise utilisera ses informations initiales, sans créer une nouvelle commande.');
+      }
+      // NEVER recompute the RPC payload after an uncertain result or a catalog refresh.
+      let result;
+      try{
+        result=await slxSavePublicOrder(order,previous.id,previous.body);
+      }catch(e){
+        throw new Error('Réponse de création incertaine. Réessayez : la même tentative sera utilisée. '+friendlyError(e));
+      }
+      if(!result?.id||!result?.order_number)throw new Error('Réponse de création incomplète. Ne renvoyez pas une nouvelle commande.');
+      const s={
+        orderId:result.id,phone:previous.body.p_phone,name:previous.body.p_customer_name,
+        ref:result.order_number,
+        expiresAt:result.verification_expires_at||'',testMode:false,testOnly:false,
+        resendAt:sl54GetResendAt(previous.body.p_phone)
+      };
+      // Persist the creation receipt BEFORE mutating cart/DOM or clearing anything.
+      const created={...previous,phase:'created',response:{
+        id:result.id,order_number:result.order_number,
+        verification_expires_at:result.verification_expires_at||''
+      },otpState:s};
+      try{sl65PersistAttempt(created)}catch{
+        throw new Error('Commande créée, mais sauvegarde locale impossible. Gardez cette page ouverte et vérifiez le suivi avant toute nouvelle tentative.');
+      }
+      sl54OtpState=s;
+      try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(s))}catch{}
+      // UI failure cannot turn an already persisted order into a new create attempt.
+      try{
+        state.cart=[];
+        try{sessionStorage.removeItem(ckey())}catch{}
+        document.querySelector('#modal')?.remove();
+        renderCart();
+      }catch(e){console.warn('Commande sauvegardée; rafraîchissement panier impossible',e)}
       sl54OtpModal('Envoi du code OTP…');
       await sl54SendOtp();
-    }catch(e){toast('Création non confirmée. Vérifiez votre connexion puis réessayez sans modifier le panier : le même identifiant sera réutilisé. '+friendlyError(e));setBusy('#orderBtn',false,'Confirmer la commande')}
+    }catch(e){toast(friendlyError(e))}
+    finally{
+      sl65PlacingOrder=false;
+      setBusy('#orderBtn',false,'Confirmer la commande');
+    }
   };
 
   // Reprendre une commande après actualisation sans interrompre une autre fenêtre.
   setTimeout(async function(){
     let pending=null;
     try{pending=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null')}catch{}
+    const created=sl65ReadAttempt();
+    if((!pending||!pending.orderId)&&created?.phase==='created'&&created.otpState?.orderId){
+      pending={...created.otpState};
+      try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(pending))}catch{}
+    }
     if(!pending||!pending.orderId||!sl54PhoneE164(pending.phone))return;
     sl54OtpState={...pending,testMode:false,testOnly:false};
     // Public tracking requires both the order reference and original phone.
@@ -1481,6 +1577,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
         const latest=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null');
         if(latest&&String(latest.orderId)===String(pending.orderId)){
           sessionStorage.removeItem('sl54_pending_order');
+          sl65ClearCreatedAttempt(pending.orderId);
           if(sl54OtpState?.orderId===pending.orderId)sl54OtpState=null;
           toast('Commande déjà vérifiée côté serveur. Aucun nouveau SMS nécessaire.');
         }
