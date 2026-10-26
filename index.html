@@ -1496,7 +1496,24 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     try{
       const raw=sessionStorage.getItem(sl65AttemptKey);
       const stored=raw?JSON.parse(raw):null;
+      if(stored?.phase==='stale'&&stored.id)return stored;
       if(stored?.id&&stored?.body&&['pending','created'].includes(stored.phase)){
+        // Do not retain full customer contact in browser session indefinitely.
+        // A stale, uncertain attempt must NOT silently turn into a fresh order.
+        const maxAge=24*60*60*1000;
+        if(Number.isFinite(stored.createdAt)&&Date.now()-stored.createdAt>maxAge){
+          const marker={id:stored.id,phase:'stale',createdAt:stored.createdAt};
+          sessionStorage.setItem(sl65AttemptKey,JSON.stringify(marker));
+          try{
+            const pending=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null');
+            if(pending?.orderId===stored.otpState?.orderId||
+               pending?.phone===stored.body.p_phone){
+              sessionStorage.removeItem('sl54_pending_order');
+            }
+          }catch{}
+          sl65AttemptMemory=marker;
+          return marker;
+        }
         sl65AttemptMemory=stored;
         return stored;
       }
@@ -1528,6 +1545,10 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       delivery_method:mode,note,
       items:state.cart.map(p=>({product_id:p.id,name:p.name,qty:Number(p.qty||1),price:Number(p.price)}))};
     let previous=sl65ReadAttempt();
+    if(previous?.phase==='stale'){
+      toast('Les données privées de cette tentative ancienne ont été effacées. Vérifiez le suivi de commande avant de démarrer une nouvelle session.');
+      return;
+    }
     if(!previous){
       if(name.length<2)return toast('Ajoutez votre nom.');
       if(!sl41PhoneOk(phone))return toast('Ajoutez un numéro marocain valide.');
@@ -1613,6 +1634,8 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
 
   // Reprendre une commande après actualisation sans interrompre une autre fenêtre.
   setTimeout(async function(){
+    // Prune private customer fields from abandoned attempts even without checkout.
+    sl65ReadAttempt();
     let pending=null;
     try{pending=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null')}catch{}
     const created=sl65ReadAttempt();
