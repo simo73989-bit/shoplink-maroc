@@ -88,6 +88,21 @@ async function run(html) {
     assert.equal(t.calls.length,1,'no uncertain replay when persistence fails');
   }
 
+  {
+    const t=make();
+    const first=t.instance.run();
+    t.pending[0].reject(new Error('offline'));
+    await first;
+    const raw=JSON.parse(t.data.get('sl54_order_attempt'));
+    raw.createdAt=Date.now()-25*60*60*1000;
+    t.data.set('sl54_order_attempt',JSON.stringify(raw));
+    const marker=t.instance.attempt();
+    assert.equal(marker?.phase,'stale','24h past: stale marker must replace private details');
+    assert.equal(JSON.parse(t.data.get('sl54_order_attempt')).body,undefined,'PII removed');
+    await t.instance.run();
+    assert.equal(t.calls.length,1,'stale attempt does not silently create new order');
+  }
+
   const js=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
     .filter(m=>!/application\/ld\+json/i.test(m[1])&&!/\bsrc\s*=/i.test(m[1]));
   for(const script of js)new Function(script[2]);
