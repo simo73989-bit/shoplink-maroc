@@ -1397,9 +1397,14 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       const e164=sl54PhoneE164(s.phone);
       if(!e164)throw new Error('Numéro invalide');
       if(!access){
-        const vr=await fetch(SUPABASE_URL+'/auth/v1/verify',{method:'POST',headers:{
-          apikey:SUPABASE_KEY,'Content-Type':'application/json'
-        },body:JSON.stringify({type:'sms',phone:e164,token:code})});
+        let vr;
+        try{
+          vr=await fetch(SUPABASE_URL+'/auth/v1/verify',{method:'POST',headers:{
+            apikey:SUPABASE_KEY,'Content-Type':'application/json'
+          },body:JSON.stringify({type:'sms',phone:e164,token:code})});
+        }catch{
+          throw new Error('Réponse SMS interrompue. Le code a pu être consommé sans confirmer la commande. Consultez le suivi avant de demander un nouveau SMS.');
+        }
         const vd=await vr.json().catch(()=>({}));
         if(!vr.ok||!vd.access_token)throw new Error(vd.msg||vd.message||'Code incorrect ou expiré');
         access=vd.access_token;
