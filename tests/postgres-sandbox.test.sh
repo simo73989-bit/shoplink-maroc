@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'rc=$?; echo "POSTGRES SANDBOX FAILED: line ${LINENO}, command: ${BASH_COMMAND}" >&2; exit "$rc"' ERR
 # Ephemeral test database only. NEVER point PGHOST/PGDATABASE at Supabase production.
 if [[ "${PGHOST:-}" != "localhost" || "${PGDATABASE:-}" != "postgres" ]]; then
   echo "REFUSING: this harness only runs against localhost disposable PostgreSQL test DB" >&2
