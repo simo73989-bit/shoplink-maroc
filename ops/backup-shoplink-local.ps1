@@ -27,9 +27,8 @@ $arguments = @('--host','aws-1-eu-west-1.pooler.supabase.com','--port','5432','-
 & $pgDump @arguments
 $code = $LASTEXITCODE
 if ($code -ne 0) {
-  if ((Test-Path -LiteralPath $target) -and (Get-Item -LiteralPath $target).Length -eq 0) {
-    Remove-Item -LiteralPath $target -Force
-  }
+  # Remove incomplete output created by this failed invocation, even if nonzero bytes.
+  if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
   throw "Backup failed (exit $code). No validated backup was created."
 }
 $item = Get-Item -LiteralPath $target
