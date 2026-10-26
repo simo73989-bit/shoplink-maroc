@@ -1,0 +1,53 @@
+name: ShopLink PostgreSQL Sandbox
+
+on:
+  push:
+    branches:
+      - fix/shoplink-security-otp-20261025
+    paths:
+      - 'index.html'
+      - 'tests/**'
+      - 'supabase/changes/01_order_idempotence_PREPARED.sql'
+      - '.github/workflows/shoplink-postgres-sandbox.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ephemeral-postgres:
+    name: Compile SQL and test retries (no Supabase access)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 8
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGDATABASE: postgres
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - name: Check out test branch
+        uses: actions/checkout@v4
+      - name: Simulated frontend recovery tests
+        run: node tests/checkout-recovery.test.cjs
+      - name: Ensure PostgreSQL client exists
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y postgresql-client
+          fi
+      - name: Compile migration and exercise real PostgreSQL concurrency
+        run: bash tests/postgres-sandbox.test.sh
