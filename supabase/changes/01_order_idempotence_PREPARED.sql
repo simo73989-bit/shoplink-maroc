@@ -81,7 +81,7 @@ BEGIN
   INSERT INTO public.order_create_attempts(request_id,payload_hash,order_id,response)
   VALUES (p_request_id,v_hash,(v_result->>'id')::uuid,v_public_response);
   RETURN v_public_response;
-END
+END;
 $fn$;
 
 REVOKE ALL ON FUNCTION public.place_public_order_idempotent(
