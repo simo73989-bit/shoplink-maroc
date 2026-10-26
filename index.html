@@ -1538,7 +1538,21 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     setBusy('#orderBtn',true,'Envoi…');
     try{
       if(previous?.phase==='created'&&previous.otpState?.orderId){
-        sl54OtpState={...previous.otpState,testMode:false,testOnly:false};
+        const recovered=previous.otpState;
+        try{
+          const st=await api('/rest/v1/rpc/track_public_order',{method:'POST',auth:false,
+            body:{p_order_number:recovered.ref,p_phone:recovered.phone}});
+          if(st?.phone_verified===true){
+            sl65ClearCreatedAttempt(recovered.orderId);
+            try{
+              const saved=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null');
+              if(saved?.orderId===recovered.orderId)sessionStorage.removeItem('sl54_pending_order');
+            }catch{}
+            toast('Commande déjà vérifiée côté serveur. Aucun nouvel SMS nécessaire.');
+            return;
+          }
+        }catch{}
+        sl54OtpState={...recovered,testMode:false,testOnly:false};
         try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState))}catch{}
         document.querySelector('#modal')?.remove();
         sl54OtpModal('Cette commande existe déjà. Reprenez sa vérification; aucune nouvelle commande créée.');
@@ -1620,8 +1634,10 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
         if(latest&&String(latest.orderId)===String(pending.orderId)){
           sessionStorage.removeItem('sl54_pending_order');
           sl65ClearCreatedAttempt(pending.orderId);
-          if(sl54OtpState?.orderId===pending.orderId)sl54OtpState=null;
-          toast('Commande déjà vérifiée côté serveur. Aucun nouveau SMS nécessaire.');
+          if(sl54OtpState?.orderId===pending.orderId){
+            sl54OtpState=null;
+            toast('Commande déjà vérifiée côté serveur. Aucun nouveau SMS nécessaire.');
+          }
         }
         return;
       }
