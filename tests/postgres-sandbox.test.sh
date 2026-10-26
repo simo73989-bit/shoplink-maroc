@@ -64,4 +64,6 @@ OTHER_QUERY="$(printf '%s' "$QUERY" | sed 's/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa
 "${PSQL[@]}" -c "SET ROLE anon; $OTHER_QUERY" >"$tmpdir/anon-wrapper"
 grep -q '"order_number"' "$tmpdir/anon-wrapper"
 [[ "$("${PSQL[@]}" -c "SELECT COUNT(*) FROM public.orders;")" == "1" ]]
+echo "[notes] Exercise server-side locked notes against temporary PostgreSQL tables"
+"${PSQL[@]}" -f tests/private-order-notes.test.sql
 echo "PASS — PostgreSQL concurrency, RLS, tombstones, legacy order+test OTP RPC revoked; new RPC access kept."
