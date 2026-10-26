@@ -1,16 +1,18 @@
--- SECURITY RELEASE STEP, PREPARED ONLY. DO NOT APPLY BEFORE THE FIXED FRONTEND IS LIVE.
--- The production main frontend still attempts verify_order_phone_test_guest.
--- Applying this on its own would break that legacy checkout path.
--- Run only after deploying a reviewed frontend that uses real SMS OTP,
--- plus regression testing in staging and production backup/rollback plan.
+-- PREPARED ONLY: AFTER compatible SMS-only frontend release and backup.
+-- NEVER deploy alone while main still calls guest test OTP.
+-- Confirm no legitimate integrations need these insecure test RPCs.
+BEGIN;
 REVOKE EXECUTE ON FUNCTION public.verify_order_phone_test_guest(uuid,text,text)
-  FROM PUBLIC, anon, authenticated;
+  FROM PUBLIC, anon, authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION public.verify_order_phone_test(uuid,text)
-  FROM PUBLIC, anon, authenticated;
--- Deliberately preserve EXECUTE for service_role for any controlled internal recovery work.
--- Later, drop these RPCs only after checking all external clients and scheduled jobs.
--- Verification checks:
--- select has_function_privilege('anon','public.verify_order_phone_test_guest(uuid,text,text)','EXECUTE');  -- false
+  FROM PUBLIC, anon, authenticated, service_role;
+-- Do not grant service_role access unless a documented internal recovery service needs it.
+-- Real verified SMS RPC public.verify_order_phone(uuid) is NOT changed.
+COMMIT;
+
+-- Post-deploy verify (read-only):
+-- select has_function_privilege('anon','public.verify_order_phone_test_guest(uuid,text,text)','EXECUTE'); -- false
 -- select has_function_privilege('authenticated','public.verify_order_phone_test_guest(uuid,text,text)','EXECUTE'); -- false
 -- select has_function_privilege('authenticated','public.verify_order_phone_test(uuid,text)','EXECUTE'); -- false
--- Verify production verify_order_phone(uuid) remains accessible to authenticated users.
+-- select has_function_privilege('authenticated','public.verify_order_phone(uuid)','EXECUTE'); -- true
+-- Also enumerate overloaded RPCs, wrappers and function-level ACLs.
