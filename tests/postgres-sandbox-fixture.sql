@@ -42,3 +42,17 @@ BEGIN
   );
 END;
 $$;
+
+
+-- Dummy OTP RPCs to test permission revocation ONLY. These never send SMS.
+CREATE FUNCTION public.verify_order_phone_test_guest(p_order_id uuid,p_phone text,p_code text)
+RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog
+AS $$ SELECT jsonb_build_object('ok',false) $$;
+CREATE FUNCTION public.verify_order_phone_test(p_order_id uuid,p_code text)
+RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog
+AS $$ SELECT jsonb_build_object('ok',false) $$;
+CREATE FUNCTION public.verify_order_phone(p_order_id uuid)
+RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog
+AS $$ SELECT jsonb_build_object('ok',true,'phone_verified',true) $$;
+REVOKE EXECUTE ON FUNCTION public.verify_order_phone(uuid) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.verify_order_phone(uuid) TO authenticated;
