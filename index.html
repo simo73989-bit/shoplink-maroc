@@ -791,7 +791,13 @@ function slxFilterOrders(){const q=($('#slxOq')?.value||'').toLowerCase(),s=$('#
 function slxExportOrders(){
   if(!state.orders.length)return toast('Aucune commande à exporter.');
   const rows=[['Date','Client','Téléphone','Adresse','Total DH','Statut','Articles'],...state.orders.map(o=>[formatDate(o.created_at||o.createdAt),o.customer_name||'',o.contact_unlocked===true?(o.phone||''):'🔒 Masqué',o.contact_unlocked===true?(o.address||''):'🔒 Masquée',Number(o.total||0),statusLabels[o.status]||o.status,(o.items||[]).map(i=>`${i.qty||1}x ${i.name||'Article'}`).join(' | ')])];
-  const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=`shoplink-commandes-${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+  const csvCell=function(v){
+    const raw=String(v??'');
+    // Spreadsheet formula injection: preserve numeric totals, force suspicious text to stay text.
+    const safe=typeof v==='number'?raw:(/^[\s\u200b-\u200f\ufeff]*[=+@-]/u.test(raw)?"'"+raw:raw);
+    return '"'+safe.replace(/"/g,'""')+'"';
+  };
+  const csv='\ufeff'+rows.map(r=>r.map(csvCell).join(';')).join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=`shoplink-commandes-${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
 }
 
 async function slxSaveAccount(){
@@ -1216,6 +1222,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   let sl54OtpState=null;
   let sl54ResendTimer=null;
   const sl54SendingKeys=new Set();
+  const sl54VerifyingKeys=new Set();
   function sl54SendKey(s){return String(s?.orderId||'')+'|'+sl54PhoneE164(s?.phone||'')}
   function sl54RetryAfterMs(value){
     const raw=String(value||'').trim();
@@ -1304,7 +1311,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     const s=sl54OtpState;if(!s||sl54RejectExpired())return;
     document.querySelector('#modal')?.remove();
 
-    const modal=document.createElement('div');modal.className='modal';modal.id='modal';
+    const modal=document.createElement('div');modal.className='modal';modal.id='modal';modal.dataset.sl54OrderId=String(s.orderId);
     const box=document.createElement('div');box.className='modalBox successBox';
     const icon=document.createElement('div');icon.className='successIcon';icon.textContent='🔐';
     const title=document.createElement('h2');title.textContent='Vérifiez votre téléphone';
@@ -1378,6 +1385,9 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     const s=sl54OtpState;if(!s||sl54RejectExpired())return;
     const token=(document.querySelector('#sl54OtpCode')?.value||'').replace(/\D/g,'');
     if(token.length!==6)return toast('Entrez le code OTP à 6 chiffres.');
+    const requestKey=sl54SendKey(s);
+    if(sl54VerifyingKeys.has(requestKey))return;
+    sl54VerifyingKeys.add(requestKey);
     setBusy('#sl54VerifyBtn',true,'Vérification…');
     let access='';
     try{
@@ -1394,12 +1404,17 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       }finally{
         try{await fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access}})}catch{}
       }
+      // A previous OTP response must not affect a different order opened meanwhile.
       try{
-        sessionStorage.removeItem('sl54_pending_order');
-        sessionStorage.removeItem(sl54CooldownKey(s.phone));
+        const pending=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null');
+        if(pending&&String(pending.orderId)===String(s.orderId)){
+          sessionStorage.removeItem('sl54_pending_order');
+        }
       }catch{}
+      if(sl54OtpState!==s)return;
       if(sl54ResendTimer){clearInterval(sl54ResendTimer);sl54ResendTimer=null}
-      document.querySelectorAll('#modal').forEach(function(x){x.remove()});
+      const ownModal=document.querySelector('#modal[data-sl54-order-id]');
+      if(ownModal&&ownModal.dataset.sl54OrderId===String(s.orderId))ownModal.remove();
       const successModal=document.createElement('div');
       successModal.className='modal';
       successModal.id='modal';
@@ -1418,7 +1433,11 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       successModal.appendChild(successBox);
       document.body.appendChild(successModal);
       sl54OtpState=null;
-    }catch(e){toast(friendlyError(e));setBusy('#sl54VerifyBtn',false,'Vérifier la commande')}
+    }catch(e){
+      if(sl54OtpState===s){toast(friendlyError(e));setBusy('#sl54VerifyBtn',false,'Vérifier la commande')}
+    }finally{
+      sl54VerifyingKeys.delete(requestKey);
+    }
   };
   window.placeOrder=async function(){
     const name=document.querySelector('#cName')?.value.trim()||'',phone=document.querySelector('#cPhone')?.value.trim()||'',city=document.querySelector('#cCity')?.value.trim()||'',address=document.querySelector('#cAddress')?.value.trim()||'',note=document.querySelector('#cNote')?.value.trim()||'',mode=document.querySelector('#slxMode')?.value||'À convenir';
