@@ -34,7 +34,7 @@ cmp "$tmpdir/first" "$tmpdir/second" || { echo "FAILED same UUID returned differ
 echo "[4/6] Exact retry reuses original result; changed payload gets conflict"
 "${PSQL[@]}" -c "$QUERY" >"$tmpdir/retry"
 cmp "$tmpdir/first" "$tmpdir/retry"
-CHANGE_QUERY="${QUERY/\\\"qty\\\":1/\\\"qty\\\":2}"
+CHANGE_QUERY="$(printf '%s' "$QUERY" | sed 's/"qty":1/"qty":2/')"
 if "${PSQL[@]}" -c "$CHANGE_QUERY" >"$tmpdir/conflict" 2>"$tmpdir/conflict.err"; then
   echo "FAILED changed payload should raise idempotency_conflict"; exit 1
 fi
