@@ -7,10 +7,11 @@ VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','11111111-1111-4111-8111-11111111
 
 -- This order was created before the privacy migration and contains a raw contact in note.
 INSERT INTO public.orders(id,payload,shop_id,seller_id,customer_name,phone,city,note,
-  phone_verified,verification_expires_at)
+  phone_verified,verification_expires_at,updated_at)
 VALUES ('cccccccc-cccc-4ccc-8ccc-cccccccccccc','{}'::jsonb,
  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','11111111-1111-4111-8111-111111111111',
- 'Fake Customer','061*****99','Sale','Call 0600000099',true,now()+interval '1 hour');
+ 'Fake Customer','061*****99','Sale','Call 0600000099',true,now()+interval '1 hour',
+ '2023-01-01 12:00:00+00'::timestamptz);
 INSERT INTO public.order_contacts(order_id,phone,address)
 VALUES ('cccccccc-cccc-4ccc-8ccc-cccccccccccc','0600000099','Test street');
 
@@ -25,6 +26,10 @@ DECLARE
 BEGIN
   SELECT count(*) INTO v_count FROM public.orders WHERE note<>'';
   IF v_count<>0 THEN RAISE EXCEPTION 'public_orders_note_leak'; END IF;
+  IF (SELECT updated_at FROM public.orders WHERE id='cccccccc-cccc-4ccc-8ccc-cccccccccccc')
+     IS DISTINCT FROM '2023-01-01 12:00:00+00'::timestamptz THEN
+     RAISE EXCEPTION 'migration_modified_historical_updated_at';
+  END IF;
 
   SELECT note INTO v_note FROM private.order_notes
    WHERE order_id='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
