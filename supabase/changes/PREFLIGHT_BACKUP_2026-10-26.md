@@ -30,7 +30,7 @@ These counts and checksums are **NOT a database backup**. No personal data was c
 6. Migration `04_private_order_notes_PREPARED.sql` backfills notes, blanks `orders.note`, installs private-note capture trigger and replaces `get_seller_orders()`. It is **not yet applied to production**. Do not deploy it until backup, staging integration and live schema/trigger compatibility are verified.
 
 ## Migration-04 potential side effects
-- PostgreSQL `orders_updated_at` BEFORE UPDATE trigger sets `updated_at = now()`. Historical note scrubbing would change `updated_at` for affected orders unless the migration is adjusted to preserve original chronology.
+- PostgreSQL `orders_updated_at` BEFORE UPDATE trigger sets `updated_at = now()`. Migration 04 now DISABLEs this one trigger transactionally only for the historical scrub, then ENABLEs it; the updated GitHub PostgreSQL dummy fixture and tests assert that original `updated_at` is preserved. This causes an exclusive table lock during migration and still requires maintenance-window validation with the real schema.
 - Potential conflict with existing order triggers (risk/notifications/tenant), access to `private` schema, function ownership, and RLS must be checked.
 - `get_seller_orders()` has a deletion side effect for expired, unverified orders; the prepared replacement deliberately preserves that behavior. This is a sensitive operational path requiring testing.
 - When successfully migrated, no frontend design change is required; seller's note would remain blank until unlocked.
