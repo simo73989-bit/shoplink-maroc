@@ -6,9 +6,43 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 CREATE SCHEMA extensions;
 CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
 
+CREATE SCHEMA private;
+CREATE SCHEMA auth;
+CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE
+AS $ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $;
+
+CREATE TABLE public.shops (
+  id uuid PRIMARY KEY,
+  owner_id uuid NOT NULL
+);
 CREATE TABLE public.orders (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  payload jsonb NOT NULL
+  payload jsonb NOT NULL,
+  shop_id uuid REFERENCES public.shops(id),
+  seller_id uuid,
+  customer_name text NOT NULL DEFAULT '',
+  phone text NOT NULL DEFAULT '',
+  city text NOT NULL DEFAULT '',
+  address text NOT NULL DEFAULT '',
+  delivery_method text NOT NULL DEFAULT '',
+  note text NOT NULL DEFAULT '',
+  items jsonb NOT NULL DEFAULT '[]'::jsonb,
+  total numeric NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'new',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  contact_unlocked boolean NOT NULL DEFAULT false,
+  unlock_price numeric NOT NULL DEFAULT 5,
+  unlocked_at timestamptz,
+  payment_status text NOT NULL DEFAULT 'locked',
+  payment_id uuid,
+  phone_verified boolean NOT NULL DEFAULT false,
+  verification_expires_at timestamptz
+);
+CREATE TABLE public.order_contacts (
+  order_id uuid PRIMARY KEY REFERENCES public.orders(id) ON DELETE CASCADE,
+  phone text NOT NULL,
+  address text NOT NULL DEFAULT ''
 );
 
 -- Controlled stub models the call boundary, not the production implementation.
