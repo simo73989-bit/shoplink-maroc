@@ -59,3 +59,23 @@
 - The 5 MAD backend pending payment is serialized on the same order row and reuses the existing pending payment ID, but the external gateway session and prevention of multiple **actual card charges** remain unproven. The exposed checkout link must NOT be considered a verified provider integration.
 - SMS Auth response loss after the provider consumed the OTP cannot be reliably recovered without an issued access token; instruct the buyer to request a new SMS if server-side tracking does not show confirmed status.
 - A previously open tab can keep executing the original frontend after Vercel deployment. Plan cache/version enforcement and a safe migration window BEFORE closing test OTP RPCs; never leave an old-tab-only bypass enabled permanently.
+
+
+## Private order notes — additional prepared migration 04
+
+**NOT DEPLOYED**: \`supabase/changes/04_private_order_notes_PREPARED.sql\`.
+
+Read-only live inspection confirmed that \`public.orders.note\` holds the raw buyer note; \`get_seller_orders()\` returns it even when \`contact_unlocked=false\`. A seller can also query their own raw \`orders.note\` via their existing orders SELECT policy. CSS hiding does **not** protect this data.
+
+Migration 04 is designed to:
+1. Create \`private.order_notes\` (RLS on; \`anon\` and \`authenticated\` have no schema usage or direct table access) with a FK to \`orders\`.
+2. Migrate historical raw notes to the private table inside one transaction and scrub \`public.orders.note\`. Existing \`orders_updated_at\` triggers may update historical \`updated_at\` values; evaluate that before production.
+3. Install an AFTER INSERT/UPDATE trigger to capture new/changed buyer notes and empty the public note column before the transaction commits. Empty notes also delete the private copy.
+4. Replace \`get_seller_orders()\` with an identically typed result, returning the private note to the right seller **only when \`contact_unlocked=true\`**, keeping existing contact masking and owner checks.
+5. Keep frontend markup, logo and layout unchanged. Buyer still submits the same note input.
+
+The private-note test suite \`tests/private-order-notes.test.sql\` runs on ephemeral PostgreSQL 17 in GitHub Actions and checks historical backfill, locked/unlocked seller responses, cross-seller access, direct table scrub, update/clear, deletion cascades and private table grants. **Current revised test run has not yet been independently confirmed green**: verify GitHub Actions workflow before any backend rollout.
+
+This protects the buyer's \`note\` free text in the orders table; it does not prove that every other free-text field (\`customer_name\`, \`city\`, \`items[].name\`) could never contain an encoded phone number. Decide whether to mask or validate those fields too if claiming a strict no-PII-before-payment guarantee.
+
+**Migration order:** stage 04 and test with the real Supabase schema/triggers; validate seller order rendering and whitelisted/free unlock, payment unlock, and historic updated_at semantics. Only then consider production 04 after backup, independently from the OTP/payment rollout. If rollback is needed, **never repopulate \`public.orders.note\` with private notes**, which would restore the leak.
