@@ -64,7 +64,9 @@ BEGIN
     p_shop_id,p_customer_name,p_phone,p_city,p_address,
     p_delivery_method,p_note,p_items
   );
-  IF v_result IS NULL OR NOT (v_result ? 'id') THEN
+  IF v_result IS NULL OR jsonb_typeof(v_result) <> 'object'
+     OR nullif(v_result->>'id','') IS NULL
+     OR nullif(v_result->>'order_number','') IS NULL THEN
     RAISE EXCEPTION 'unexpected_order_result';
   END IF;
 

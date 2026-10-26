@@ -7,7 +7,11 @@ on:
     paths:
       - 'index.html'
       - 'tests/**'
-      - 'supabase/changes/01_order_idempotence_PREPARED.sql'
+      - 'supabase/changes/**'
+      - 'supabase/functions/**'
+      - 'supabase/config.toml'
+      - 'ops/**'
+      - 'payments/**'
       - '.github/workflows/shoplink-postgres-sandbox.yml'
   workflow_dispatch:
 
@@ -24,7 +28,7 @@ jobs:
         image: postgres:17
         env:
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
+          POSTGRES_DB: shoplink_sandbox
         ports:
           - 5432:5432
         options: >-
@@ -35,7 +39,7 @@ jobs:
     env:
       PGHOST: localhost
       PGPORT: '5432'
-      PGDATABASE: postgres
+      PGDATABASE: shoplink_sandbox
       PGUSER: postgres
       PGPASSWORD: postgres
     steps:
@@ -45,6 +49,17 @@ jobs:
         run: node tests/checkout-recovery.test.cjs
       - name: Payment idempotency sandbox (no real charges)
         run: node tests/payment-gateway-contract-sandbox.test.cjs
+      - name: Validate backup helper without a database connection
+        shell: pwsh
+        run: ./tests/backup-helper.test.ps1
+      - name: Install Deno for prepared Edge Function checks
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.5.6
+      - name: Check prepared Edge Functions
+        run: |
+          deno check supabase/functions/contact-unlock/index.ts supabase/functions/contact-payment-webhook/index.ts
+          deno test --allow-env=CONTACT_PAYMENT_ALLOWED_ORIGIN tests/payment-edge.test.ts
       - name: Ensure PostgreSQL client exists
         run: |
           if ! command -v psql >/dev/null 2>&1; then

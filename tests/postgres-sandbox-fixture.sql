@@ -39,11 +39,22 @@ CREATE TABLE public.orders (
   phone_verified boolean NOT NULL DEFAULT false,
   verification_expires_at timestamptz
 );
+-- Representative documented seller SELECT policy, not a production-schema clone.
+ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.shops ENABLE ROW LEVEL SECURITY;
+GRANT SELECT ON public.orders,public.shops TO authenticated;
+CREATE POLICY seller_shops ON public.shops FOR SELECT TO authenticated
+USING(owner_id=auth.uid());
+CREATE POLICY seller_orders ON public.orders FOR SELECT TO authenticated
+USING(seller_id=auth.uid() AND EXISTS(SELECT 1 FROM public.shops s WHERE s.id=shop_id AND s.owner_id=auth.uid()));
 CREATE TABLE public.order_contacts (
   order_id uuid PRIMARY KEY REFERENCES public.orders(id) ON DELETE CASCADE,
   phone text NOT NULL,
   address text NOT NULL DEFAULT ''
 );
+
+ALTER TABLE public.order_contacts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.order_contacts FROM PUBLIC,anon,authenticated;
 
 -- Mirror real production orders_updated_at BEFORE UPDATE semantics.
 CREATE FUNCTION private.set_updated_at() RETURNS trigger
@@ -77,6 +88,8 @@ BEGIN
   PERFORM pg_sleep(0.3);
   INSERT INTO public.orders(id,payload)
   VALUES (v_id,jsonb_build_array(p_shop_id,p_customer_name,p_phone,p_city,p_address,p_delivery_method,p_note,p_items));
+  IF p_note='FAIL_AFTER_INSERT' THEN RAISE EXCEPTION 'fixture_creation_failure'; END IF;
+  IF p_note='INVALID_RESULT' THEN RETURN jsonb_build_object('id',NULL); END IF;
   RETURN jsonb_build_object(
     'id',v_id,
     'order_number',upper(substr(replace(v_id::text,'-',''),1,8)),

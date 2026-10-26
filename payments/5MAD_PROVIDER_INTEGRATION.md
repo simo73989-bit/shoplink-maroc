@@ -40,3 +40,41 @@ Before committing to a provider: check whether it supports **5 MAD micropayments
 - Real 5 MAD charging: **NO-GO** until merchant PSP selected, credentials safely installed in Supabase function secrets, its official API implemented, sandbox tests and external charge reconciliation independently verified.
 - Current fake/placeholder `CONTACT_PAYMENT_CHECKOUT_URL` must NOT be used for real charging.
 - OTP was explicitly deferred by the product owner: **do not turn on card payments in production while phone verification remains disabled and test-code RPC access remains exposed**.
+
+## Prepared implementation added during finalization
+
+`supabase/functions/_shared/payment-core.mjs` is now the shared implementation
+executed by the Node sandbox tests, rather than a disconnected specification-only
+harness. The two `supabase/functions/contact-*` directories are prepared replacements;
+**they are not deployed copies**. `configuredProvider()` deliberately returns `null`.
+Neither an environment variable nor a static checkout URL can enable payment.
+
+Migration `05_payment_sessions_PREPARED.sql` installs a separate private ledger.
+It must be integrated with the actual legacy billing schema before any rollout:
+its IDs are NOT written into legacy `orders.payment_id`, whose FK/schema is not in
+this repository. Existing payment history, admin reporting and whitelist/free flows
+must be reconciled. Never use both old and new finalizers for one order.
+
+The adapter contract is sandbox-only: official raw-body signature + timestamp
+validation, official transaction-status lookup, merchant binding, fixed **500 minor
+units = 5.00 MAD**, documented status conversion, stable PSP idempotency key and exact
+checkout host allowlist. These checks must be implemented from the selected PSP's
+published merchant documentation. No fabricated signature algorithm is shipped.
+
+One attempt is retained for the life of an order, including terminal failures, so
+ambiguous failures cannot trigger a second charge. A later retry-generation policy
+requires authoritative void/expiry confirmation of every old payment session.
+Refund events re-lock contacts; previously disclosed information cannot be recalled.
+The prepared checkout endpoint requires an explicitly allowed browser origin, Auth
+JWT validation and private service-side DB calls. Webhooks acknowledge only after
+the DB transaction completes. Failures return non-2xx for safe provider retries.
+
+Tests distinguish actual PostgreSQL ledger locks/ACLs from fake PSP responses. They
+do not validate an official PSP signature, external debit or production integration.
+
+Deployment configuration is prepared in `supabase/config.toml`: the PSP webhook
+cannot require a Supabase JWT, so its trust must come exclusively from the official
+adapter. The currently disabled adapter rejects every callback. Keep this endpoint
+undeployed until that replacement verification has passed review and sandbox tests.
+The ledger restricts physical deletion of orders with financial history; integrate
+an archival policy with the existing seller deletion RPC before enabling it.

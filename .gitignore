@@ -1,0 +1,7 @@
+# Local private backups and credentials must never enter the repository.
+*.dump
+*.dump.partial
+*.backup
+.env
+.env.*
+!.env.example

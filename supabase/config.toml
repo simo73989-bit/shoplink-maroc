@@ -1,0 +1,8 @@
+# Prepared function configuration only; no deployment is authorized.
+# Provider webhook has no Supabase JWT. Official provider verification MUST replace
+# that trust boundary; the shipped disabled adapter rejects every callback.
+[functions.contact-payment-webhook]
+verify_jwt = false
+
+[functions.contact-unlock]
+verify_jwt = true

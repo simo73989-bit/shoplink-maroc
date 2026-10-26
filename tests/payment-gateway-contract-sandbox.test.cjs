@@ -1,93 +1,81 @@
 'use strict';
-// GATEWAY-AGNOSTIC SANDBOX SPECIFICATION; never use as a real payment processor.
-// Simulates merchant/provider checkout idempotency, signature verification,
-// provider amount verification, duplicate events and unlock-once DB policy.
-// DOES NOT execute external payments or access Supabase credentials.
-const assert=require('node:assert/strict');
-const {createHmac,timingSafeEqual}=require('node:crypto');
-
-const MAD=5;
-const SECRET='TEST_ONLY_NOT_A_REAL_GATEWAY_SECRET';
-const signing=(body)=>createHmac('sha256',SECRET).update(body).digest('hex');
-function requireSignedEvent(raw,signature){
-  const expected=Buffer.from(signing(raw),'hex');
-  if(typeof signature!=='string'||!/^[0-9a-f]{64}$/i.test(signature))throw Error('unsigned_event');
-  const supplied=Buffer.from(signature,'hex');
-  if(!timingSafeEqual(expected,supplied))throw Error('bad_provider_signature');
-  const event=JSON.parse(raw);
-  if(event.currency!=='MAD'||event.amount!==MAD)throw Error('amount_currency_invalid');
-  if(!event.id||!event.provider_payment_id||!event.payment_id||!event.order_id)throw Error('missing_event_identity');
-  return event;
+// Executes shipped payment core with an explicit fake provider and in-memory DB.
+// SQL/locks/roles are tested separately on PostgreSQL. NO real PSP integration.
+const assert = require('node:assert/strict');
+const {test} = require('node:test');
+const core = import('../supabase/functions/_shared/payment-core.mjs');
+function fixture() {
+  const sessions = new Map(); let creates=0, loseResponse=false, unlocks=0;
+  const payment={id:'payment-1',status:'pending',order_id:'order-1'};
+  const db={
+    async prepare(order,seller) {assert.equal(order,'order-1');if(seller!=='seller-A')throw Error('unauthorized');return {...payment};},
+    async saveSession(id,session,url) {assert.equal(id,payment.id);payment.provider_session_id=session;payment.checkout_url=url;return {...payment};},
+    async applyEvent(e) {unlocks++;return {ok:true,event:e};}
+  };
+  const tx={transactionId:'tx-1',merchantId:'merchant-test',amountMinor:500,currency:'MAD',
+    paymentId:payment.id,orderId:'order-1',sessionId:'session-1',status:'succeeded'};
+  const provider={name:'FAKE_TEST_ONLY',mode:'sandbox',officialVerification:true,supportsIdempotency:true,
+    merchantId:'merchant-test',checkoutHosts:['sandbox.example'],
+    async createSession(args) {
+      assert.equal(args.amountMinor,500);assert.equal(args.currency,'MAD');
+      assert.equal(args.merchantId,'merchant-test');assert.equal(args.idempotencyKey,payment.id);
+      if(!sessions.has(args.idempotencyKey)){creates++;sessions.set(args.idempotencyKey,{id:'session-1',url:'https://sandbox.example/pay/1'});}
+      await new Promise(r=>setImmediate(r));
+      if(loseResponse){loseResponse=false;throw Error('network_lost');}
+      return sessions.get(args.idempotencyKey);
+    },
+    // A test stub, deliberately NOT an official PSP signature algorithm.
+    async verifyWebhook(raw,headers) {if(headers.get('x-test-signature')!=='TEST_ONLY')throw Error('bad_signature');return JSON.parse(new TextDecoder().decode(raw));},
+    async getTransaction() {return {...tx};}
+  };
+  return {db,provider,payment,tx,creates:()=>creates,unlocks:()=>unlocks,lose:()=>{loseResponse=true}};
 }
-class CheckoutHarness{
-  constructor(){this.orders=new Map();this.pending=new Map();this.attempts=new Map();this.events=new Set();this.charges=0;this.unlocks=0;}
-  addOrder(id,seller){this.orders.set(id,{seller,verified:true,unlocked:false,paymentId:null})}
-  // Represents an atomic database row lock + transaction and PSP API idempotency by payment UUID.
-  async checkout(orderId,caller){
-    const order=this.orders.get(orderId);
-    if(!order||caller!==order.seller)throw Error('unauthorized');
-    if(!order.verified)throw Error('otp_not_verified');
-    if(order.unlocked)return {unlocked:true};
-    // A real implementation must do this part with a DB row lock/unique constraint.
-    if(!order.paymentId)order.paymentId='payment:'+orderId;
-    const paymentId=order.paymentId;
-    const prior=this.attempts.get(paymentId);
-    if(prior)return prior;
-    if(this.pending.has(paymentId))return this.pending.get(paymentId);
-    const job=(async()=>{
-      await new Promise(resolve=>setImmediate(resolve));
-      // PSP also must honor this idempotency key, not the browser's order ID or amount.
-      this.charges++;
-      const session={payment_id:paymentId,order_id:orderId,amount:MAD,currency:'MAD',
-        provider_session_id:'sandbox-session:'+paymentId,idempotency_key:paymentId};
-      this.attempts.set(paymentId,session);
-      return session;
-    })();
-    this.pending.set(paymentId,job);
-    try{return await job}finally{this.pending.delete(paymentId)}
+const request=t=>({db:t.db,provider:t.provider,orderId:'order-1',sellerId:'seller-A'});
+const event=t=>({db:t.db,provider:t.provider,raw:new TextEncoder().encode(JSON.stringify({eventId:'e1',transactionId:'tx-1'})),headers:new Headers({'x-test-signature':'TEST_ONLY'})});
+test('15 concurrent requests use stable provider key, fixed 500 MAD minor units and one session',async()=>{
+  const {checkout}=await core,t=fixture();const all=await Promise.all(Array.from({length:15},()=>checkout(request(t))));
+  assert.equal(t.creates(),1);assert.equal(new Set(all.map(x=>x.checkout_url)).size,1);
+  assert.deepEqual(await checkout(request(t)),all[0]);
+});
+test('lost provider response retries same provider key; no replacement attempt',async()=>{
+  const {checkout}=await core,t=fixture();t.lose();await assert.rejects(checkout(request(t)),/network_lost/);
+  const result=await checkout(request(t));assert.equal(result.payment_id,'payment-1');assert.equal(t.creates(),1);
+});
+test('disabled provider, production mode and provider without idempotency fail closed',async()=>{
+  const {checkout}=await core,t=fixture();
+  for(const provider of [null,{...t.provider,mode:'production'},{...t.provider,supportsIdempotency:false}])
+    await assert.rejects(checkout({...request(t),provider}),/not_configured/);
+  assert.equal(t.creates(),0);
+});
+test('wrong seller and terminal attempts cannot initiate checkout',async()=>{
+  const {checkout}=await core,t=fixture();await assert.rejects(checkout({...request(t),sellerId:'seller-B'}),/unauthorized/);
+  for(const status of ['failed','cancelled','refunded']){t.payment.status=status;await assert.rejects(checkout(request(t)),/terminal/);}
+  assert.equal(t.creates(),0);
+});
+test('only provider allowlisted HTTPS URL is returned; stored URLs also checked',async()=>{
+  const {checkout}=await core;
+  for(const url of ['http://sandbox.example/pay','https://evil.example/pay','javascript:alert(1)','https://user:pass@sandbox.example/pay']){
+    const t=fixture();t.payment.provider_session_id='existing';t.payment.checkout_url=url;
+    await assert.rejects(checkout(request(t)));assert.equal(t.creates(),0);
   }
-  webhook(raw,signature){
-    const e=requireSignedEvent(raw,signature);
-    if(this.events.has(e.id))return {duplicate_event:true,unlocks:this.unlocks};
-    const session=this.attempts.get(e.payment_id);
-    if(!session||session.order_id!==e.order_id)throw Error('payment_order_mismatch');
-    const order=this.orders.get(e.order_id);
-    if(!order||order.paymentId!==e.payment_id)throw Error('payment_not_found');
-    // Real implementation must verify provider transaction status from PSP API and/or
-    // provider-native signed callbacks. A SHOPLINK-owned shared HMAC alone is insufficient.
-    if(e.status==='succeeded'){
-      if(!order.unlocked){order.unlocked=true;order.providerPaymentId=e.provider_payment_id;this.unlocks++}
-      else if(order.providerPaymentId!==e.provider_payment_id)throw Error('additional_external_charge_requires_reconciliation');
-    }
-    this.events.add(e.id);
-    return {ok:true,unlocks:this.unlocks};
+});
+test('unsigned callback cannot reach transaction lookup or DB',async()=>{
+  const {webhook}=await core,t=fixture();let lookups=0;t.provider.getTransaction=async()=>{lookups++;return t.tx;};
+  await assert.rejects(webhook({...event(t),headers:new Headers()}),/bad_signature/);
+  assert.equal(lookups,0);assert.equal(t.unlocks(),0);
+});
+test('signed event still requires exact PSP transaction, merchant, currency, amount and status',async()=>{
+  const {webhook}=await core;
+  for(const change of [{amountMinor:499},{amountMinor:'500'},{currency:'EUR'},{merchantId:'other'},
+    {transactionId:'other'},{status:'authorized'},{sessionId:null},{paymentId:null}]){
+    const t=fixture();Object.assign(t.tx,change);await assert.rejects(webhook(event(t)),/transaction_invalid/);
+    assert.equal(t.unlocks(),0);
   }
-}
-async function run(){
-  const pay=new CheckoutHarness();
-  pay.addOrder('ord-1','owner-A');
-  const sessions=await Promise.all(Array.from({length:15},()=>pay.checkout('ord-1','owner-A')));
-  assert.equal(new Set(sessions.map(x=>x.provider_session_id)).size,1);
-  assert.equal(pay.charges,1,'concurrent click/retry must initiate provider session once');
-  assert.equal(sessions[0].amount,5);
-  assert.equal(sessions[0].currency,'MAD');
-  await assert.rejects(()=>pay.checkout('ord-1','other-seller'),/unauthorized/);
-  const good={id:'evt-1',payment_id:sessions[0].payment_id,order_id:'ord-1',
-    provider_payment_id:'psp-charge-1',status:'succeeded',amount:5,currency:'MAD'};
-  const raw=JSON.stringify(good);
-  assert.throws(()=>pay.webhook(raw,'00'.repeat(32)),/bad_provider_signature/);
-  assert.throws(()=>pay.webhook(JSON.stringify({...good,amount:1}),signing(JSON.stringify({...good,amount:1}))),/amount_currency_invalid/);
-  assert.throws(()=>pay.webhook(JSON.stringify({...good,order_id:'ord-2'}),signing(JSON.stringify({...good,order_id:'ord-2'}))),/payment_order_mismatch/);
-  assert.equal(pay.webhook(raw,signing(raw)).ok,true);
-  assert.equal(pay.webhook(raw,signing(raw)).duplicate_event,true);
-  assert.equal(pay.unlocks,1,'duplicate webhook should never unlock again');
-  const replayAnotherEvent=JSON.stringify({...good,id:'evt-2'});
-  assert.equal(pay.webhook(replayAnotherEvent,signing(replayAnotherEvent)).ok,true);
-  assert.equal(pay.unlocks,1);
-  const newCharge=JSON.stringify({...good,id:'evt-3',provider_payment_id:'psp-charge-2'});
-  assert.throws(()=>pay.webhook(newCharge,signing(newCharge)),/additional_external_charge_requires_reconciliation/);
-  assert.deepEqual(await pay.checkout('ord-1','owner-A'),{unlocked:true});
-  assert.equal(pay.charges,1);
-  console.log('PASS: payment checkout contract sandbox (concurrent retry x15, one session, 5 MAD, owner auth, signed callback, duplicate events, suspicious second charge)');
-}
-run().catch(e=>{console.error(e);process.exitCode=1});
+});
+test('normalized authoritative success/failure/cancel/refund events reach the atomic DB RPC',async()=>{
+  const {webhook}=await core;
+  for(const status of ['succeeded','failed','cancelled','refunded']){
+    const t=fixture();t.tx.status=status;const result=await webhook(event(t));
+    assert.equal(result.event.amount_minor,500);assert.equal(result.event.status,status);assert.equal(result.event.event_id,'e1');
+  }
+});

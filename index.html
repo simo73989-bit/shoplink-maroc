@@ -1185,10 +1185,20 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
 
     modal.appendChild(box);document.body.appendChild(modal);
   }
-  window.sl41OpenPayment=function(orderId,paymentId,raw){try{const u=new URL(raw,location.origin);if(paymentId&&!u.searchParams.has('payment_id'))u.searchParams.set('payment_id',paymentId);if(!u.searchParams.has('order_id'))u.searchParams.set('order_id',orderId);if(!u.searchParams.has('amount'))u.searchParams.set('amount','5');if(!u.searchParams.has('currency'))u.searchParams.set('currency','MAD');if(!u.searchParams.has('return_url'))u.searchParams.set('return_url',location.href);window.open(u.toString(),'_blank','noopener')}catch{window.open(raw,'_blank','noopener')}};
+  window.sl41OpenPayment=function(orderId,paymentId,raw){
+    try{
+      const u=new URL(raw);
+      if(u.protocol!=='https:'||u.username||u.password)throw new Error('invalid_payment_url');
+      window.open(u.href,'_blank','noopener,noreferrer');
+    }catch{toast('Lien de paiement invalide. Aucun paiement ouvert.');}
+  };
   window.sl41VerifyUnlock=async function(id){document.querySelector('#sl41PayModal')?.remove();await sl41UnlockContact(id)};
+  const sl65UnlockInFlight=new Set();
   window.sl41UnlockContact=async function(id){
-    try{const data=await api('/functions/v1/contact-unlock',{method:'POST',auth:true,body:{order_id:id}});if(data?.unlocked){const o=state.orders.find(x=>String(x.id)===String(id));if(o){o.contact_unlocked=true;o.phone=data.phone||o.phone;o.address=data.address||o.address||'';o.payment_status=data.payment_status||'succeeded';o.unlocked_at=new Date().toISOString()}toast(data?.whitelisted?'Whitelist 5 DH : contact débloqué ✅':'Contact débloqué ✅');await sl41RefreshOrders();return}sl41PaymentModal(data,id)}catch(e){toast(friendlyError(e))}
+    id=String(id);
+    if(sl65UnlockInFlight.has(id))return;
+    sl65UnlockInFlight.add(id);
+    try{const data=await api('/functions/v1/contact-unlock',{method:'POST',auth:true,body:{order_id:id}});if(data?.unlocked){const o=state.orders.find(x=>String(x.id)===String(id));if(o){o.contact_unlocked=true;o.phone=data.phone||o.phone;o.address=data.address||o.address||'';o.payment_status=data.payment_status||'succeeded';o.unlocked_at=new Date().toISOString()}toast(data?.whitelisted?'Whitelist 5 DH : contact débloqué ✅':'Contact débloqué ✅');await sl41RefreshOrders();return}sl41PaymentModal(data,id)}catch(e){toast(friendlyError(e))}finally{sl65UnlockInFlight.delete(id)}
   };
 
   const SL41_publicStore=window.publicStore;
@@ -1500,7 +1510,13 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   function sl65ReadAttempt(){
     try{
       const raw=sessionStorage.getItem(sl65AttemptKey);
-      const stored=raw?JSON.parse(raw):null;
+      let stored;
+      try{stored=raw?JSON.parse(raw):null}catch{
+        return sl65AttemptMemory||{phase:'stale',id:'unreadable'};
+      }
+      if(raw&&(!stored?.id||!['pending','created','stale'].includes(stored.phase)||
+        (stored.phase!=='stale'&&!stored.body)))
+        return sl65AttemptMemory||{phase:'stale',id:'unreadable'};
       if(stored?.phase==='stale'&&stored.id)return stored;
       if(stored?.id&&stored?.body&&['pending','created'].includes(stored.phase)){
         // Do not retain full customer contact in browser session indefinitely.

@@ -13,11 +13,11 @@ async function run(html) {
 
   function make(options={}){
     const values={cName:'Test client',cPhone:'0612345670',cCity:'Salé',cAddress:'Street',cNote:'',slxMode:'À convenir'};
-    const data=new Map(), calls=[],pending=[],messages=[];
+    const data=options.data||new Map(), calls=[],pending=[],messages=[];
     let storageFails=!!options.storageFails,seq=0,renderFails=!!options.renderFails;
     const storage={
       getItem:k=>{if(storageFails)throw Error('storage disabled');return data.get(k)||null},
-      setItem:(k,v)=>{if(storageFails)throw Error('storage disabled');data.set(k,v)},
+      setItem:(k,v)=>{if(storageFails||(options.failReceipt&&k==='sl54_order_attempt'&&JSON.parse(v).phase==='created'))throw Error('storage disabled');data.set(k,v)},
       removeItem:k=>{if(storageFails)throw Error('storage disabled');data.delete(k)}
     };
     const document={querySelector(q){
@@ -40,7 +40,7 @@ async function run(html) {
       state,()=>true,m=>messages.push(String(m)),()=>{},slxSavePublicOrder,
       e=>e?.message||String(e),()=> 'cart',()=>{if(renderFails)throw Error('render failed')},
       ()=>0,m=>messages.push(String(m)),()=>Promise.resolve(),
-      async()=>({phone_verified:false}));
+      async()=>({phone_verified:!!options.verified}));
     return {calls,pending,data,messages,instance,state,
       setStorageFails:v=>{storageFails=v},setRenderFails:v=>{renderFails=v}};
   }
@@ -59,6 +59,8 @@ async function run(html) {
     await Promise.all([a,b]);
     t.state.cart[0].name='changed after network loss';
     t.state.cart[0].price=2000;
+    t.state.cart[0].qty=3; // unlike name/price, this field IS an RPC argument
+    t.state.cart.push({id:'other-product',qty:2,price:1,name:'other'});
     const retry=t.instance.run();
     assert.equal(t.calls.length,2);
     assert.equal(t.calls[0].id,t.calls[1].id,'UUID stable');
@@ -102,6 +104,34 @@ async function run(html) {
     await t.instance.run();
     assert.equal(t.calls.length,1,'stale attempt does not silently create new order');
   }
+
+  {
+    const t=make();
+    const p=t.instance.run();t.pending[0].reject(Error('lost response'));await p;
+    const reloaded=make({data:t.data});
+    const retry=reloaded.instance.run();
+    assert.equal(reloaded.calls[0].id,t.calls[0].id,'reload retains uncertain UUID');
+    assert.deepEqual(reloaded.calls[0].body,t.calls[0].body);
+    reloaded.pending[0].resolve({id:'reload-order',order_number:'RELOAD'});await retry;
+    const resumed=make({data:t.data});await resumed.instance.run();
+    assert.equal(resumed.calls.length,0,'created receipt resumes OTP without another create');
+    const verified=make({data:t.data,verified:true});await verified.instance.run();
+    assert.equal(verified.calls.length,0);assert.equal(verified.instance.attempt(),null);
+  }
+  {
+    const t=make({failReceipt:true});const p=t.instance.run();
+    t.pending[0].resolve({id:'created-but-unsaved',order_number:'SAVED'});await p;
+    assert.equal(t.instance.attempt().phase,'pending','durable UUID survives receipt write failure');
+    const again=make({data:t.data});const retry=again.instance.run();
+    assert.equal(again.calls[0].id,t.calls[0].id);
+    again.pending[0].resolve({id:'created-but-unsaved',order_number:'SAVED'});await retry;
+  }
+  for(const raw of ['{broken','null','{}','{"id":"x","phase":"pending"}']){
+    const t=make({data:new Map([['sl54_order_attempt',raw]])});await t.instance.run();
+    assert.equal(t.calls.length,0,'corrupt attempt must fail closed: '+raw);
+  }
+  await require('./otp-recovery.test.cjs').run(html);
+  await require('./seller-privacy.test.cjs').run(html);
 
   const js=[...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
     .filter(m=>!/application\/ld\+json/i.test(m[1])&&!/\bsrc\s*=/i.test(m[1]));

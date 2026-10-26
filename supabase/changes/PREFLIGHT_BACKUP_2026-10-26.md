@@ -41,3 +41,20 @@ Migration 04 tested against real production schema clone: **NO** (only a dummy G
 Safe to run production migration 04: **NO**
 
 Reference: https://supabase.com/docs/guides/platform/backups
+
+## Finalization update (no new production inspection)
+
+The observations above remain a historical snapshot. No live backup or production
+migration was attempted in this finalization session. **Backup verified: NO.**
+
+Migration 04 now captures BEFORE writes with a deferred FK, scrubs RETURNING results,
+handles nested trigger writes, preserves historical fields and original trigger
+mode, and makes seller reads non-destructive. Actual PostgreSQL 17.11 dummy-schema
+tests passed; a real-schema clone restore and all production triggers remain untested.
+
+The Windows helper now requires verified TLS (`verify-full`, trusted system CA or
+`-SslRootCert`), validates both client versions, rejects a Git checkout destination,
+uses unique partial archives and removes them after any failure. PowerShell tests
+use fake tools only. It produces a logical, **unencrypted** archive: encrypt/protect
+it locally, keep it outside synchronized/public folders, and verify an isolated
+restore. A successful archive catalog check alone never clears the migration hold.
