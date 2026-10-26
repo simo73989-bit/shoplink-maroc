@@ -42,14 +42,20 @@
 - Preserve existing payment webhook and transactions while debugging. A rollback must not re-charge clients.
 
 ## Further constraints and cautions
-- The browser keeps immutable order parameters in **sessionStorage**, including buyer contact, until the order is verified. This is limited to the tab but not XSS-proof; avoid localStorage, control scripts/CSP, and set a retention/privacy policy.
+- The browser keeps immutable order parameters in **sessionStorage**, including buyer contact. As of this revision, abandoned attempts older than **24 hours** are redacted to a `stale` marker with only UUID and timestamp, and checkout is blocked instead of automatically creating a new potentially duplicate order. This is limited to the tab and not XSS-proof; hardening CSP and preventing third-party scripts remains necessary.
 - Browser sessionStorage can be cleared by the user, so no client-only scheme can promise a stable UUID after arbitrary clearing. Server-side rate limits, account/order reconciliation, and old-v2 retirement still matter.
 - The server-stored idempotency marker has no automatic expiry. Define a retention window that exceeds the maximum documented replay lifetime; never delete markers while the same UUID can replay.
-- Both test OTP RPCs still exist in production pending a safe release. Their existence is a security risk.
-- Prepared SQL has not been parsed/run on a real PostgreSQL staging database. Frontend scripted tests use mocks; no SMS, payments, DDL or production data mutations were made.
+- Both test OTP RPCs still exist in production pending a safe release. Read-only live ACL checks CONFIRM that `verify_order_phone_test_guest` is executable by `anon` and `authenticated`, and `verify_order_phone_test` by `authenticated`. Their existence is a security risk. The old v2 creation RPC is still executable by `anon` and `authenticated`; new-client idempotency does not secure direct legacy RPC calls.
+- Prepared SQL has not been parsed/run on a real PostgreSQL staging database. A Codex audit identified a missing PL/pgSQL `END;` semicolon and it was corrected in GitHub; the corrected SQL still requires isolated execution and privilege tests. Frontend scripted tests use mocks; no SMS, payments, DDL or production data mutations were made.
 
 ## Tests currently run
 - Parsed 14 inline JavaScript scripts; original CSS blocks unmodified.
-- Mocked same-page double submit (one request), changed catalog after response loss (same UUID and unchanged payload), unavailable sessionStorage (no request), render exception after successful creation (receipt + OTP still retained), storage loss on retry (fail-closed).
+- Mocked same-page double submit (one request), changed catalog after response loss (same UUID and unchanged payload), unavailable sessionStorage (no request), render exception after successful creation (receipt + OTP still retained), storage loss on retry (fail-closed), and aged abandoned attempt (PII removed after 24h; no automatic replacement request).
 - Mocked accepted Auth SMS + ambiguous order-RPC: authoritative tracking confirmed success, or retry re-used the same in-memory token without a second Auth request; persistent server failure produced no false success.
 - These tests do NOT establish PostgreSQL concurrency safety, RLS, payment charges, real SMS delivery or mobile/browser compatibility.
+
+## Additional blockers verified after the second Codex audit
+- **P1 SQL syntax fixed**: `END;` now terminates the PL/pgSQL function body. Static check alone cannot prove compilation on real PostgreSQL.
+- The 5 MAD backend pending payment is serialized on the same order row and reuses the existing pending payment ID, but the external gateway session and prevention of multiple **actual card charges** remain unproven. The exposed checkout link must NOT be considered a verified provider integration.
+- SMS Auth response loss after the provider consumed the OTP cannot be reliably recovered without an issued access token; instruct the buyer to request a new SMS if server-side tracking does not show confirmed status.
+- A previously open tab can keep executing the original frontend after Vercel deployment. Plan cache/version enforcement and a safe migration window BEFORE closing test OTP RPCs; never leave an old-tab-only bypass enabled permanently.
