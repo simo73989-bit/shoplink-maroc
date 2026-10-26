@@ -785,12 +785,12 @@ function slxEnhanceOrders(){
   const m=$('#dashMain');if(!m||m.querySelector('.slxOrderTools'))return;
   const top=m.querySelector('.topRow');if(top)top.insertAdjacentHTML('beforeend','<div class="slxTopActions"><button class="btn soft slxRefresh" onclick="slxRefresh(\'orders\')">↻ Actualiser</button><button class="btn soft" onclick="slxExportOrders()">⬇ CSV</button></div>');
   const panel=m.querySelector('.panel');if(panel)panel.insertAdjacentHTML('afterbegin',`<div class="slxOrderTools"><input id="slxOq" placeholder="Client, téléphone, adresse…" oninput="slxFilterOrders()"><select id="slxOs" onchange="slxFilterOrders()"><option value="">Tous les statuts</option>${Object.entries(statusLabels).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>`);
-  setTimeout(()=>{const table=m.querySelector('.table');if(table){const hr=table.querySelector('thead tr');if(hr&&hr.children.length<6)hr.insertAdjacentHTML('beforeend','<th>Actions</th>');table.querySelectorAll('tbody tr').forEach((tr,i)=>{const o=state.orders[i];if(o){tr.dataset.oid=o.id;tr.dataset.status=o.status||'new';tr.dataset.search=`${o.customer_name||''} ${o.phone||''} ${o.address||''}`.toLowerCase()}})}},10);
+  setTimeout(()=>{const table=m.querySelector('.table');if(table){const hr=table.querySelector('thead tr');if(hr&&hr.children.length<6)hr.insertAdjacentHTML('beforeend','<th>Actions</th>');table.querySelectorAll('tbody tr').forEach((tr,i)=>{const o=state.orders[i];if(o){tr.dataset.oid=o.id;tr.dataset.status=o.status||'new';tr.dataset.search=`${o.customer_name||''} ${o.contact_unlocked===true?(o.phone||'')+' '+(o.address||''):''}`.toLowerCase()}})}},10);
 }
 function slxFilterOrders(){const q=($('#slxOq')?.value||'').toLowerCase(),s=$('#slxOs')?.value||'';document.querySelectorAll('.table tbody tr[data-oid]').forEach(tr=>tr.style.display=(!q||tr.dataset.search.includes(q))&&(!s||tr.dataset.status===s)?'':'none')}
 function slxExportOrders(){
   if(!state.orders.length)return toast('Aucune commande à exporter.');
-  const rows=[['Date','Client','Téléphone','Adresse','Total DH','Statut','Articles'],...state.orders.map(o=>[formatDate(o.created_at||o.createdAt),o.customer_name||'',o.phone||'',o.address||'',Number(o.total||0),statusLabels[o.status]||o.status,(o.items||[]).map(i=>`${i.qty||1}x ${i.name||'Article'}`).join(' | ')])];
+  const rows=[['Date','Client','Téléphone','Adresse','Total DH','Statut','Articles'],...state.orders.map(o=>[formatDate(o.created_at||o.createdAt),o.customer_name||'',o.contact_unlocked===true?(o.phone||''):'🔒 Masqué',o.contact_unlocked===true?(o.address||''):'🔒 Masquée',Number(o.total||0),statusLabels[o.status]||o.status,(o.items||[]).map(i=>`${i.qty||1}x ${i.name||'Article'}`).join(' | ')])];
   const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(';')).join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=`shoplink-commandes-${new Date().toISOString().slice(0,10)}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
 }
 
@@ -1215,11 +1215,12 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   };
   let sl54OtpState=null;
   let sl54ResendTimer=null;
-  let sl54SendingOtp=false;
+  const sl54SendingKeys=new Set();
+  function sl54SendKey(s){return String(s?.orderId||'')+'|'+sl54PhoneE164(s?.phone||'')}
   function sl54RetryAfterMs(value){
     const raw=String(value||'').trim();
     const ms=/^\d+$/.test(raw)?Number(raw)*1000:(Date.parse(raw)-Date.now());
-    return Number.isFinite(ms)?Math.min(86400000,Math.max(60000,ms)):60000;
+    return Number.isFinite(ms)?Math.min(Number.MAX_SAFE_INTEGER-Date.now(),Math.max(60000,ms)):60000;
   }
   function sl54Expired(s){
     const t=Date.parse(String(s?.expiresAt||''));
@@ -1227,8 +1228,22 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   }
   function sl54RejectExpired(){
     if(!sl54OtpState||!sl54Expired(sl54OtpState))return false;
+    const expired=sl54OtpState;
     sl54OtpState=null;
     try{sessionStorage.removeItem('sl54_pending_order')}catch{}
+    if(sl54ResendTimer){clearInterval(sl54ResendTimer);sl54ResendTimer=null}
+    const box=document.querySelector('#modal:has(#sl54VerifyBtn) .modalBox');
+    if(box){
+      const title=document.createElement('h2');
+      title.textContent='Commande expirée';
+      const info=document.createElement('p');
+      info.textContent='Le délai de vérification de la commande #'+String(expired.ref||'')+' est terminé. Consultez le suivi de commande avant de réessayer.';
+      const close=document.createElement('button');
+      close.type='button';close.className='btn primary full';
+      close.textContent='Fermer';
+      close.onclick=function(){box.closest('#modal')?.remove()};
+      box.replaceChildren(title,info,close);
+    }
     toast('Le délai de vérification est expiré. Vérifiez le statut de votre commande avant toute nouvelle tentative.');
     return true;
   }
@@ -1241,12 +1256,13 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       return Number.isFinite(v)?v:0;
     }catch{return 0}
   }
-  function sl54SetResendAt(phone='',ms=60000){
+  function sl54SetResendAt(phone='',ms=60000,requestState=sl54OtpState){
     const at=Date.now()+ms;
-    if(sl54OtpState)sl54OtpState.resendAt=at;
+    const isCurrent=sl54OtpState===requestState;
+    if(isCurrent)requestState.resendAt=at;
     try{
       sessionStorage.setItem(sl54CooldownKey(phone),String(at));
-      if(sl54OtpState)sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState));
+      if(isCurrent)sessionStorage.setItem('sl54_pending_order',JSON.stringify(requestState));
     }catch{}
     return at;
   }
@@ -1322,7 +1338,9 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   }
   window.sl54SendOtp=async function(){
     const s=sl54OtpState;
-    if(!s||sl54SendingOtp||sl54RejectExpired())return;
+    if(!s||sl54RejectExpired())return;
+    const requestKey=sl54SendKey(s);
+    if(sl54SendingKeys.has(requestKey))return;
     s.testMode=false;s.testOnly=false;
     const cooldownAt=Math.max(Number(s.resendAt||0),sl54GetResendAt(s.phone));
     s.resendAt=cooldownAt;
@@ -1332,28 +1350,28 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     }
     const e164=sl54PhoneE164(s.phone);
     if(!e164)return toast('Numéro invalide.');
-    sl54SendingOtp=true;
+    sl54SendingKeys.add(requestKey);
     const resendBtn=document.querySelector('#sl54ResendBtn');
     if(resendBtn){resendBtn.disabled=true;resendBtn.textContent='Envoi…'}
     try{
-      const r=await fetch(SUPABASE_URL+'/auth/v1/otp',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({phone:e164})});
-      const d=await r.json().catch(()=>({}));
-      if(!r.ok){
-        const e=new Error(d.msg||d.message||d.error_description||'Service SMS indisponible');
-        e.status=r.status;e.retryAfter=r.headers?.get('Retry-After')||'';
-        throw e;
+      const response=await fetch(SUPABASE_URL+'/auth/v1/otp',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({phone:e164})});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok){
+        const err=new Error(data.msg||data.message||data.error_description||'Service SMS indisponible');
+        err.status=response.status;err.retryAfter=response.headers?.get('Retry-After')||'';
+        throw err;
       }
-      sl54SetResendAt(s.phone,60000);
-      sl54OtpModal('Code envoyé. Vous pourrez le renvoyer dans 60 secondes.');
+      sl54SetResendAt(s.phone,60000,s);
+      if(sl54OtpState===s)sl54OtpModal('Code envoyé. Vous pourrez le renvoyer dans 60 secondes.');
     }catch(e){
       const throttled=e?.status===429;
       const cooldown=throttled?sl54RetryAfterMs(e.retryAfter):30000;
-      sl54SetResendAt(s.phone,cooldown);
-      sl54OtpModal(throttled
+      sl54SetResendAt(s.phone,cooldown,s);
+      if(sl54OtpState===s)sl54OtpModal(throttled
         ? 'Trop de demandes SMS. Attendez la fin du délai affiché avant de réessayer.'
         : 'Impossible d’envoyer le SMS. Réessayez après le délai affiché. Aucun code test n’est accepté.');
     }finally{
-      sl54SendingOtp=false;
+      sl54SendingKeys.delete(requestKey);
     }
   };
   window.sl54VerifyOtp=async function(){
