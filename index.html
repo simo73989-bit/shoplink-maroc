@@ -1223,6 +1223,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   let sl54ResendTimer=null;
   const sl54SendingKeys=new Set();
   const sl54VerifyingKeys=new Set();
+  let sl65OtpGrant=null; // short-lived, in-memory only; never put the OTP session JWT in storage
   function sl54SendKey(s){return String(s?.orderId||'')+'|'+sl54PhoneE164(s?.phone||'')}
   function sl54RetryAfterMs(value){
     const raw=String(value||'').trim();
@@ -1383,34 +1384,63 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
   };
   window.sl54VerifyOtp=async function(){
     const s=sl54OtpState;if(!s||sl54RejectExpired())return;
-    const token=(document.querySelector('#sl54OtpCode')?.value||'').replace(/\D/g,'');
-    if(token.length!==6)return toast('Entrez le code OTP à 6 chiffres.');
     const requestKey=sl54SendKey(s);
     if(sl54VerifyingKeys.has(requestKey))return;
+    const alreadyAccepted=sl65OtpGrant?.orderId===s.orderId && sl65OtpGrant?.phone===s.phone;
+    const code=(document.querySelector('#sl54OtpCode')?.value||'').replace(/\D/g,'');
+    if(!alreadyAccepted&&code.length!==6)return toast('Entrez le code OTP à 6 chiffres.');
     sl54VerifyingKeys.add(requestKey);
     setBusy('#sl54VerifyBtn',true,'Vérification…');
-    let access='';
+    let access=alreadyAccepted?sl65OtpGrant.token:'';
+    let verified=false;
     try{
       const e164=sl54PhoneE164(s.phone);
       if(!e164)throw new Error('Numéro invalide');
-      const vr=await fetch(SUPABASE_URL+'/auth/v1/verify',{method:'POST',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json'},body:JSON.stringify({type:'sms',phone:e164,token})});
-      const vd=await vr.json().catch(()=>({}));
-      if(!vr.ok||!vd.access_token)throw new Error(vd.msg||vd.message||'Code incorrect ou expiré');
-      access=vd.access_token;
-      try{
-        const rr=await fetch(SUPABASE_URL+'/rest/v1/rpc/verify_order_phone',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access,'Content-Type':'application/json'},body:JSON.stringify({p_order_id:s.orderId})});
-        const rd=await rr.json().catch(()=>({}));
-        if(!rr.ok)throw new Error(rd.message||rd.error||'Vérification impossible');
-      }finally{
-        try{await fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:'Bearer '+access}})}catch{}
+      if(!access){
+        const vr=await fetch(SUPABASE_URL+'/auth/v1/verify',{method:'POST',headers:{
+          apikey:SUPABASE_KEY,'Content-Type':'application/json'
+        },body:JSON.stringify({type:'sms',phone:e164,token:code})});
+        const vd=await vr.json().catch(()=>({}));
+        if(!vr.ok||!vd.access_token)throw new Error(vd.msg||vd.message||'Code incorrect ou expiré');
+        access=vd.access_token;
+        sl65OtpGrant={orderId:s.orderId,phone:s.phone,token:access};
       }
-      // A previous OTP response must not affect a different order opened meanwhile.
+      try{
+        const rr=await fetch(SUPABASE_URL+'/rest/v1/rpc/verify_order_phone',{method:'POST',headers:{
+          apikey:SUPABASE_KEY,Authorization:'Bearer '+access,'Content-Type':'application/json'
+        },body:JSON.stringify({p_order_id:s.orderId})});
+        const rd=await rr.json().catch(()=>({}));
+        // HTTP 200 alone is not a business confirmation.
+        if(!rr.ok||rd?.ok!==true||rd?.phone_verified!==true)throw new Error(
+          rd?.message||rd?.error||'Confirmation de la commande non obtenue'
+        );
+        verified=true;
+      }catch(confirmError){
+        // A lost HTTP reply may occur AFTER the backend marked this order verified.
+        // Check state immediately, rather than consuming a second SMS OTP.
+        try{
+          const status=await api('/rest/v1/rpc/track_public_order',{
+            method:'POST',auth:false,
+            body:{p_order_number:s.ref,p_phone:s.phone}
+          });
+          if(status?.phone_verified===true)verified=true;
+        }catch{}
+        if(!verified)throw confirmError;
+      }
+      // No false success unless RPC confirmation or authoritative tracking says verified.
+      if(!verified)throw new Error('Vérification de commande non confirmée.');
+      try{
+        if(access)await fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:{
+          apikey:SUPABASE_KEY,Authorization:'Bearer '+access
+        }});
+      }catch{}
+      if(sl65OtpGrant?.orderId===s.orderId&&sl65OtpGrant?.phone===s.phone)sl65OtpGrant=null;
       try{
         const pending=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null');
-        if(pending&&String(pending.orderId)===String(s.orderId)){
-          sessionStorage.removeItem('sl54_pending_order');
-        }
+        if(pending&&String(pending.orderId)===String(s.orderId))sessionStorage.removeItem('sl54_pending_order');
+        sessionStorage.removeItem(sl54CooldownKey(s.phone));
       }catch{}
+      sl65ClearCreatedAttempt(s.orderId);
       if(sl54OtpState!==s)return;
       if(sl54ResendTimer){clearInterval(sl54ResendTimer);sl54ResendTimer=null}
       const ownModal=document.querySelector('#modal[data-sl54-order-id]');
@@ -1434,7 +1464,14 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       document.body.appendChild(successModal);
       sl54OtpState=null;
     }catch(e){
-      if(sl54OtpState===s){toast(friendlyError(e));setBusy('#sl54VerifyBtn',false,'Vérifier la commande')}
+      if(sl54OtpState===s){
+        if(access&&sl65OtpGrant?.orderId===s.orderId){
+          toast('Code SMS déjà accepté. La confirmation n’est pas certaine : réessayez avec Vérifier, sans demander un autre SMS. '+friendlyError(e));
+        }else{
+          toast(friendlyError(e));
+        }
+        setBusy('#sl54VerifyBtn',false,'Vérifier la commande');
+      }
     }finally{
       sl54VerifyingKeys.delete(requestKey);
     }
