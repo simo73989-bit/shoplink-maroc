@@ -1232,7 +1232,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     sl54OtpState=null;
     try{sessionStorage.removeItem('sl54_pending_order')}catch{}
     if(sl54ResendTimer){clearInterval(sl54ResendTimer);sl54ResendTimer=null}
-    const box=document.querySelector('#modal:has(#sl54VerifyBtn) .modalBox');
+    const box=document.querySelector('#sl54VerifyBtn')?.closest('.modalBox');
     if(box){
       const title=document.createElement('h2');
       title.textContent='Commande expirée';
