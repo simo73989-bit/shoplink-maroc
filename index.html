@@ -1552,6 +1552,11 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       }else if(JSON.stringify(previous.body)!==JSON.stringify(sl65Payload(order))){
         toast('Une commande précédente reste incertaine. La reprise utilisera ses informations initiales, sans créer une nouvelle commande.');
       }
+      // Re-verify session persistence on EVERY retry, not just first submission.
+      // Fail closed if storage became unavailable while the previous HTTP outcome was uncertain.
+      try{sl65PersistAttempt(previous)}catch{
+        throw new Error('Stockage temporaire indisponible. Aucun nouvel envoi effectué, afin d’éviter un doublon.');
+      }
       // NEVER recompute the RPC payload after an uncertain result or a catalog refresh.
       let result;
       try{
