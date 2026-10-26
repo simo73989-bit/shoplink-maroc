@@ -48,5 +48,14 @@ if "${PSQL[@]}" -c "$QUERY" >"$tmpdir/deleted" 2>"$tmpdir/deleted.err"; then
 fi
 grep -q "order_deleted" "$tmpdir/deleted.err"
 [[ "$("${PSQL[@]}" -c "SELECT COUNT(*) FROM public.orders;")" == "0" ]]
-echo "[6/6] All assertions passed for the isolated dummy backend."
-echo "PASS — PostgreSQL compile, atomic concurrency, stable replay, payload conflict, tombstone, RLS and ACLs."
+echo "[6/7] Close legacy v2 API in disposable test DB and validate grants"
+"${PSQL[@]}" -f supabase/changes/03_close_legacy_order_v2_AFTER_CUTOVER.sql >/dev/null
+[[ "$("${PSQL[@]}" -c "SELECT has_function_privilege('anon','public.place_public_order_v2(uuid,text,text,text,text,text,text,jsonb)','EXECUTE');")" == "f" ]]
+[[ "$("${PSQL[@]}" -c "SELECT has_function_privilege('authenticated','public.place_public_order_v2(uuid,text,text,text,text,text,text,jsonb)','EXECUTE');")" == "f" ]]
+[[ "$("${PSQL[@]}" -c "SELECT has_function_privilege('anon','public.place_public_order_idempotent(uuid,uuid,text,text,text,text,text,text,jsonb)','EXECUTE');")" == "t" ]]
+echo "[7/7] Wrapper still works as anon after old RPC permissions removed"
+OTHER_QUERY="$(printf '%s' "$QUERY" | sed 's/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/dddddddd-dddd-4ddd-8ddd-dddddddddddd/')"
+"${PSQL[@]}" -c "SET ROLE anon; $OTHER_QUERY" >"$tmpdir/anon-wrapper"
+grep -q '"order_number"' "$tmpdir/anon-wrapper"
+[[ "$("${PSQL[@]}" -c "SELECT COUNT(*) FROM public.orders;")" == "1" ]]
+echo "PASS — PostgreSQL real concurrent retries, RLS, tombstones, legacy RPC closed, wrapper accessible to anon."
