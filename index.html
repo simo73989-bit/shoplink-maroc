@@ -1217,7 +1217,7 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
 
   window.slxSavePublicOrder=async function(order){
     if(!REMOTE){if(state.publicShop.slug===state.shop.slug){const local={id:crypto.randomUUID(),order_number:Math.random().toString(36).slice(2,10).toUpperCase(),...order,phone:String(order.phone).slice(0,3)+'•••••'+String(order.phone).slice(-2),contact_unlocked:false,created_at:new Date().toISOString()};state.orders.unshift(local);DB.set('sl_orders',state.orders);return local}return {id:crypto.randomUUID()}}
-    return api('/rest/v1/rpc/place_public_order_v2',{method:'POST',auth:false,body:{p_shop_id:order.shop_id,p_customer_name:order.customer_name,p_phone:order.phone,p_city:order.city,p_address:order.address,p_delivery_method:order.delivery_method,p_note:order.note,p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))}})
+    return api('/rest/v1/rpc/place_public_order_idempotent',{method:'POST',auth:false,body:{p_request_id:order.requestId,p_shop_id:order.shop_id,p_customer_name:order.customer_name,p_phone:order.phone,p_city:order.city,p_address:order.address,p_delivery_method:order.delivery_method,p_note:order.note,p_items:order.items.map(i=>({product_id:i.product_id,qty:i.qty}))}})
   };
   let sl54OtpState=null;
   let sl54ResendTimer=null;
@@ -1443,9 +1443,16 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
     const name=document.querySelector('#cName')?.value.trim()||'',phone=document.querySelector('#cPhone')?.value.trim()||'',city=document.querySelector('#cCity')?.value.trim()||'',address=document.querySelector('#cAddress')?.value.trim()||'',note=document.querySelector('#cNote')?.value.trim()||'',mode=document.querySelector('#slxMode')?.value||'À convenir';
     if(name.length<2)return toast('Ajoutez votre nom.');if(!sl41PhoneOk(phone))return toast('Ajoutez un numéro marocain valide.');if(city.length<2)return toast('Ajoutez votre ville.');if(mode==='Livraison'&&address.length<3)return toast('Ajoutez une adresse de livraison.');
     const order={shop_id:state.publicShop.id,customer_name:name,phone,city,address,delivery_method:mode,note,items:state.cart.map(p=>({product_id:p.id,name:p.name,qty:Number(p.qty||1),price:Number(p.price)}))};
+    // Preserve one stable id across retries and refreshes for the same payload.
+    const fingerprint=JSON.stringify(order);
+    let previous=null;
+    try{previous=JSON.parse(sessionStorage.getItem('sl54_order_attempt')||'null')}catch{}
+    order.requestId=(previous&&previous.fingerprint===fingerprint&&/^[0-9a-f-]{36}$/i.test(previous.id||''))?previous.id:crypto.randomUUID();
+    try{sessionStorage.setItem('sl54_order_attempt',JSON.stringify({id:order.requestId,fingerprint}))}catch{}
     setBusy('#orderBtn',true,'Envoi…');
     try{
       const result=await slxSavePublicOrder(order);
+      try{sessionStorage.removeItem('sl54_order_attempt')}catch{}
       const ref=result?.order_number||String(result?.id||'').replace(/-/g,'').slice(0,8).toUpperCase();
       state.cart=[];try{sessionStorage.removeItem(ckey())}catch{}
       document.querySelector('#modal')?.remove();renderCart();
@@ -1454,15 +1461,35 @@ window.addEventListener('hashchange',render);window.addEventListener('popstate',
       try{sessionStorage.setItem('sl54_pending_order',JSON.stringify(sl54OtpState))}catch{}
       sl54OtpModal('Envoi du code OTP…');
       await sl54SendOtp();
-    }catch(e){toast(friendlyError(e));setBusy('#orderBtn',false,'Confirmer la commande')}
+    }catch(e){toast('Création non confirmée. Vérifiez votre connexion puis réessayez sans modifier le panier : le même identifiant sera réutilisé. '+friendlyError(e));setBusy('#orderBtn',false,'Confirmer la commande')}
   };
 
   // Reprendre une commande après actualisation sans interrompre une autre fenêtre.
-  setTimeout(function(){
+  setTimeout(async function(){
     let pending=null;
     try{pending=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null')}catch{}
     if(!pending||!pending.orderId||!sl54PhoneE164(pending.phone))return;
     sl54OtpState={...pending,testMode:false,testOnly:false};
+    // Public tracking requires both the order reference and original phone.
+    // Never trust a client-side flag as confirmation; ask the RPC for server state.
+    try{
+      const status=await api('/rest/v1/rpc/track_public_order',{
+        method:'POST',auth:false,
+        body:{p_order_number:pending.ref,p_phone:pending.phone}
+      });
+      if(status?.phone_verified===true){
+        const latest=JSON.parse(sessionStorage.getItem('sl54_pending_order')||'null');
+        if(latest&&String(latest.orderId)===String(pending.orderId)){
+          sessionStorage.removeItem('sl54_pending_order');
+          if(sl54OtpState?.orderId===pending.orderId)sl54OtpState=null;
+          toast('Commande déjà vérifiée côté serveur. Aucun nouveau SMS nécessaire.');
+        }
+        return;
+      }
+    }catch(e){
+      // Connectivity or tracking issues must not erase a potentially valid pending order.
+    }
+    if(!sl54OtpState||String(sl54OtpState.orderId)!==String(pending.orderId))return;
     if(sl54RejectExpired())return;
     const showPending=function(){
       if(!sl54OtpState||sl54OtpState.orderId!==pending.orderId)return true;
