@@ -45,6 +45,18 @@ CREATE TABLE public.order_contacts (
   address text NOT NULL DEFAULT ''
 );
 
+-- Mirror real production orders_updated_at BEFORE UPDATE semantics.
+CREATE FUNCTION private.set_updated_at() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog
+AS $fn$
+BEGIN
+  NEW.updated_at=now();
+  RETURN NEW;
+END;
+$fn$;
+CREATE TRIGGER orders_updated_at BEFORE UPDATE ON public.orders
+FOR EACH ROW EXECUTE FUNCTION private.set_updated_at();
+
 -- Controlled stub models the call boundary, not the production implementation.
 -- The real place_public_order_v2 is separately reviewed through read-only Supabase.
 CREATE FUNCTION public.place_public_order_v2(
