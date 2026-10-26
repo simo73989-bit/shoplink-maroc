@@ -14,6 +14,7 @@ Choose a licensed/acquiring merchant with card acceptance in Morocco, and obtain
 - Payzone: online card acquiring and custom API, merchant onboarding/KYC. https://payzone.ma/faqs/
 - NAPS ePay: hosted payment page and API with sandbox onboarding; public pack prices indicate **material setup/annual costs**, not a permanent 0 MAD integration. https://siteweb.naps.ma/entreprises/accepter-les-paiements/paiements-en-ligne/ and https://naps.ma/paiements-en-ligne/
 - CMI: Moroccan e-commerce acquiring services, contract/merchant onboarding. https://www.cmi.co.ma/fr/solutions-paiement-ecommerce
+- **Do NOT choose YouCan Pay for a fixed 5 MAD charge:** its official FAQ states a **10 MAD minimum transaction** although its no-setup/no-monthly-fees offer looks appealing. https://youcanpay.com/faq
 
 Before committing to a provider: check whether it supports **5 MAD micropayments**, fees/minimum charges, refunds, merchant KYC (business registration), local currency MAD, and an API idempotency key. DO NOT share merchant API secrets in ChatGPT/GitHub.
 
