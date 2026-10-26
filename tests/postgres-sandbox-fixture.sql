@@ -9,7 +9,7 @@ CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
 CREATE SCHEMA private;
 CREATE SCHEMA auth;
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE
-AS $ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $;
+AS $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
 
 CREATE TABLE public.shops (
   id uuid PRIMARY KEY,
