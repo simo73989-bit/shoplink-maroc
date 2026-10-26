@@ -43,6 +43,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Simulated frontend recovery tests
         run: node tests/checkout-recovery.test.cjs
+      - name: Payment idempotency sandbox (no real charges)
+        run: node tests/payment-gateway-contract-sandbox.test.cjs
       - name: Ensure PostgreSQL client exists
         run: |
           if ! command -v psql >/dev/null 2>&1; then
