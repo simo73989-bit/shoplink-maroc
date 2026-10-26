@@ -17,8 +17,14 @@ ALTER TABLE private.order_notes ENABLE ROW LEVEL SECURITY;
 INSERT INTO private.order_notes(order_id, note)
 SELECT id, note FROM public.orders WHERE note <> '';
 
--- This touches updated_at on existing orders if an updated_at trigger is present.
+-- Existing orders_updated_at BEFORE UPDATE trigger changes updated_at to now().
+-- Temporarily disable THIS trigger inside the same transaction while scrubbing
+-- historical notes; PostgreSQL rolls back the trigger setting if anything fails.
+-- ALTER TABLE acquires an exclusive table lock: schedule downtime or a low-traffic
+-- maintenance window after a verified backup, even if today's note count is small.
+ALTER TABLE public.orders DISABLE TRIGGER orders_updated_at;
 UPDATE public.orders SET note = '' WHERE note <> '';
+ALTER TABLE public.orders ENABLE TRIGGER orders_updated_at;
 
 -- AFTER (not BEFORE) permits the new orders row to exist for FK integrity.
 CREATE FUNCTION private.capture_order_note() RETURNS trigger
@@ -112,6 +118,7 @@ COMMIT;
 -- SELECT has_schema_privilege('authenticated','private','USAGE'); -- false
 -- Exercise: before/after paid unlock, seller A vs B, direct orders SELECT,
 -- INSERT note, UPDATE note, clear note, delete order, rollback, and RLS.
--- RISK: historical orders.updated_at values may change when scrubbing notes;
--- inspect whether the app relies on that chronology before production rollout.
+-- The existing orders_updated_at trigger is temporarily disabled ONLY while
+-- historical notes are scrubbed, preserving original updated_at timestamps.
+-- Migration 04 remains blocking DDL; assess acceptable maintenance window.
 -- ROLLBACK: never restore sensitive notes into public.orders.note.
